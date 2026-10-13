@@ -18,6 +18,7 @@ import {
 	type DescFile,
 	type DescMessage,
 	type DescMethod,
+	type DescService,
 	fromBinary,
 	type MessageShape,
 	type Registry,
@@ -69,6 +70,13 @@ export class Protobuf {
 		const schema = this.#registry.getMessage(typeName);
 		if (!schema) throw new UnknownTypeError(typeName);
 		return schema;
+	}
+
+	/** A service, by its full name (`package.Service`). */
+	service(typeName: string): DescService {
+		const service = this.#registry.getService(typeName);
+		if (!service) throw new UnknownTypeError(typeName, "service");
+		return service;
 	}
 
 	/**

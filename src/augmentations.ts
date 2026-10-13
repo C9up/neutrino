@@ -13,6 +13,7 @@
 // Referenced so the augmentation below resolves the module it augments.
 import type {} from "@c9up/ream/types";
 
+import type { GrpcServices } from "./GrpcServices.js";
 import type { Protobuf } from "./Protobuf.js";
 
 declare module "@c9up/ream/types" {
@@ -21,5 +22,9 @@ declare module "@c9up/ream/types" {
 		"neutrino.protobuf": Protobuf;
 		/** The same binding under the bare role name. */
 		protobuf: Protobuf;
+		/** The gRPC services served on the HTTP port, bound by `NeutrinoProvider`. */
+		"neutrino.grpc": GrpcServices;
+		/** The same binding under the bare role name. */
+		grpc: GrpcServices;
 	}
 }

@@ -18,6 +18,10 @@
     "./services/main": {
       "types": "./src/services/main.ts",
       "import": "./src/services/main.ts"
+    },
+    "./services/grpc": {
+      "types": "./src/services/grpc.ts",
+      "import": "./src/services/grpc.ts"
     }
   },
   "scripts": {
@@ -63,6 +67,10 @@
       "./services/main": {
         "types": "./dist/services/main.d.ts",
         "import": "./dist/services/main.js"
+      },
+      "./services/grpc": {
+        "types": "./dist/services/grpc.d.ts",
+        "import": "./dist/services/grpc.js"
       }
     },
     "access": "public"

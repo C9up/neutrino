@@ -11,8 +11,8 @@ export default defineConfig({
 			// only be crossed downwards on purpose.
 			thresholds: {
 				lines: 98,
-				statements: 96,
-				branches: 83,
+				statements: 97,
+				branches: 86,
 				functions: 100,
 			},
 		},

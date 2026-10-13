@@ -1,7 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { defineConfig, Protobuf } from "../src/index.js";
+import {
+	defineConfig,
+	type GrpcCall,
+	type GrpcReply,
+	GrpcServices,
+	Protobuf,
+} from "../src/index.js";
 import NeutrinoProvider from "../src/NeutrinoProvider.js";
+import grpc, { getGrpc } from "../src/services/grpc.js";
 import protobuf, { getProtobuf } from "../src/services/main.js";
 
 const fixturePath = (name: string): string =>
@@ -16,6 +23,10 @@ class Container {
 		this.#factories.set(token, factory);
 	}
 
+	has(token: unknown): boolean {
+		return this.#factories.has(token);
+	}
+
 	async resolve(token: unknown): Promise<unknown> {
 		if (!this.#instances.has(token)) {
 			const factory = this.#factories.get(token);
@@ -26,8 +37,9 @@ class Container {
 	}
 }
 
-function boot(config: unknown) {
+function boot(config: unknown, server?: unknown) {
 	const container = new Container();
+	if (server !== undefined) container.singleton("server", () => server);
 	const provider = new NeutrinoProvider({
 		container,
 		config: { get: (key) => (key === "protobuf" ? config : undefined) },
@@ -103,6 +115,16 @@ describe("NeutrinoProvider", () => {
 	});
 });
 
+describe("services/grpc", () => {
+	it("does not look thenable while unseated, and says what is missing on use", () => {
+		expect(getGrpc()).toBeUndefined();
+		expect(Reflect.get(grpc, "then")).toBeUndefined();
+		expect(() => Reflect.get(grpc, "handle")).toThrow(
+			"[grpc] accessed before initialization",
+		);
+	});
+});
+
 describe("services/main", () => {
 	it("does not look thenable while unseated, so importing it never throws", () => {
 		// A module loader reads `then` off what it imports; throwing there
@@ -115,5 +137,52 @@ describe("services/main", () => {
 describe("defineConfig", () => {
 	it("refuses a config that loads no schema", () => {
 		expect(() => defineConfig({})).toThrow(/declares no schema/);
+	});
+});
+
+describe("NeutrinoProvider — gRPC", () => {
+	const config = () => defineConfig({ descriptorSets: [fixturePath("echo")] });
+
+	it("hands the dispatcher to the host's server at boot", async () => {
+		const handlers: ((call: GrpcCall) => Promise<GrpcReply>)[] = [];
+		const server = {
+			grpc: (handler: (call: GrpcCall) => Promise<GrpcReply>) =>
+				handlers.push(handler),
+		};
+		const { container, provider } = boot(config(), server);
+		current = provider;
+		await provider.boot();
+
+		const services = await container.resolve(GrpcServices);
+		expect(services).toBeInstanceOf(GrpcServices);
+		expect(await container.resolve("grpc")).toBe(services);
+		expect(getGrpc()).toBe(services);
+		expect(handlers).toHaveLength(1);
+
+		// A service registered afterwards — from a preload — is served by the
+		// handler the server already holds.
+		grpc.service(protobuf.service("echo.Echo"), {
+			say: () => ({ text: "hi" }),
+		});
+		const reply = await handlers[0]?.({
+			path: "/echo.Echo/Say",
+			metadata: {},
+			ip: "127.0.0.1",
+			message: new Uint8Array(),
+		});
+		expect(reply).toHaveProperty("message");
+	});
+
+	it("refuses a server that cannot serve gRPC instead of ignoring it", async () => {
+		const { provider } = boot(config(), { use: () => {} });
+		await expect(provider.boot()).rejects.toMatchObject({
+			code: "E_NEUTRINO_GRPC_UNSUPPORTED",
+		});
+	});
+
+	it("serves nothing on a host with no server", async () => {
+		const { provider } = boot(config());
+		current = provider;
+		await expect(provider.boot()).resolves.toBeUndefined();
 	});
 });

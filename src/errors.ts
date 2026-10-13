@@ -44,10 +44,10 @@ export class DuplicateTypeError extends NeutrinoError {
 
 /** Raised when a type name is not in any loaded descriptor. */
 export class UnknownTypeError extends NeutrinoError {
-	constructor(typeName: string) {
+	constructor(typeName: string, kind: "message" | "service" = "message") {
 		super(
 			"E_NEUTRINO_UNKNOWN_TYPE",
-			`Neutrino: no message type "${typeName}" is loaded`,
+			`Neutrino: no ${kind} type "${typeName}" is loaded`,
 		);
 	}
 }
