@@ -3,7 +3,7 @@ E
 shared/when.protoshared" 
 When
 seconds (Rsecondsbproto3
-Ë
+þ
 
 echo.protoechoshared/when.proto"t
 
@@ -20,4 +20,6 @@ SayRequest
 .echo.TreeRchild2\
 Echo'
 Say.echo.SayRequest.echo.SayReply+
-Watch.echo.SayRequest.echo.SayReply0bproto3
+Watch.echo.SayRequest.echo.SayReply021
+Admin(
+Ping.echo.SayRequest.echo.SayReplybproto3

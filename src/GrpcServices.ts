@@ -128,6 +128,22 @@ export type ServiceImpl<S extends DescService> =
 			Partial<Record<string, UntypedMethod>> | object
 		: { [K in keyof S["method"]]?: UnaryImpl<S["method"][K]> };
 
+/**
+ * Runs around every call it is registered for, before the request is even
+ * decoded — the gRPC form of a middleware. Refuse the call by throwing a
+ * {@link GrpcError}; let it through by returning what `next()` returns. Pass
+ * a value on to the method with a {@link GrpcContextKey}.
+ */
+export type GrpcInterceptor = (
+	context: GrpcContext,
+	next: () => Promise<unknown>,
+) => Promise<unknown>;
+
+export interface ServiceOptions {
+	/** Run after the interceptors given to `use()`, in this order. */
+	interceptors?: readonly GrpcInterceptor[];
+}
+
 /** A method of a service known only from a descriptor set. */
 export type UntypedMethod = (
 	request: Message,
@@ -148,6 +164,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 interface Route {
 	method: DescMethod;
 	run: (request: Message, context: GrpcContext) => unknown;
+	interceptors: readonly GrpcInterceptor[];
 }
 
 export interface GrpcServicesOptions {
@@ -162,6 +179,7 @@ export class GrpcServices {
 	readonly #protobuf: Protobuf;
 	readonly #routes = new Map<string, Route>();
 	readonly #services = new Set<string>();
+	readonly #interceptors: GrpcInterceptor[] = [];
 	readonly #onError: (error: unknown, call: { path: string }) => void;
 
 	constructor(protobuf: Protobuf, options: GrpcServicesOptions = {}) {
@@ -172,12 +190,27 @@ export class GrpcServices {
 	}
 
 	/**
+	 * Run an interceptor around every call to every service, registered
+	 * before or after. Interceptors run in the order they are added. A call to
+	 * a method nobody serves is answered UNIMPLEMENTED without running any.
+	 */
+	use(interceptor: GrpcInterceptor): this {
+		this.#interceptors.push(interceptor);
+		return this;
+	}
+
+	/**
 	 * Serve a service. Refused, at registration: a function-valued key that is
 	 * not one of the service's methods (a typo would otherwise answer
 	 * UNIMPLEMENTED forever), a method implemented by something that is not a
 	 * function, a streaming method, and a service registered twice.
 	 */
-	service<S extends DescService>(service: S, impl: ServiceImpl<S>): this {
+	service<S extends DescService>(
+		service: S,
+		impl: ServiceImpl<S>,
+		options: ServiceOptions = {},
+	): this {
+		const interceptors = [...(options.interceptors ?? [])];
 		if (this.#services.has(service.typeName)) {
 			throw new NeutrinoError(
 				"E_NEUTRINO_DUPLICATE_SERVICE",
@@ -218,6 +251,7 @@ export class GrpcServices {
 					method,
 					run: (request, context) =>
 						implementation.call(impl, request, context),
+					interceptors,
 				},
 			]);
 		}
@@ -236,27 +270,53 @@ export class GrpcServices {
 			};
 		}
 		const { method, run } = route;
+		const context: GrpcContext = {
+			metadata: call.metadata,
+			ip: call.ip,
+			method,
+		};
+		const chain = [...this.#interceptors, ...route.interceptors];
 
-		let request: Message;
-		try {
-			request = this.#protobuf.decode(method.input, call.message);
-		} catch {
-			// decode reports every malformed input the same way.
-			return {
-				code: GrpcStatus.INVALID_ARGUMENT,
-				details: `The request is not a valid ${method.input.typeName}`,
-			};
-		}
-
-		try {
-			const reply = await run(request, {
-				metadata: call.metadata,
-				ip: call.ip,
-				method,
-			});
+		// The method itself: decode, run, check what it returned. Innermost, so
+		// an interceptor that refuses the call keeps its bytes from being read.
+		const invoke = async (): Promise<Record<string, unknown>> => {
+			let request: Message;
+			try {
+				request = this.#protobuf.decode(method.input, call.message);
+			} catch {
+				// decode reports every malformed input the same way.
+				throw new GrpcError(
+					GrpcStatus.INVALID_ARGUMENT,
+					`The request is not a valid ${method.input.typeName}`,
+				);
+			}
+			const reply = await run(request, context);
 			if (!isRecord(reply)) {
 				throw new TypeError(
 					`${call.path} returned ${reply === null ? "null" : typeof reply}, not a ${method.output.typeName}`,
+				);
+			}
+			return reply;
+		};
+
+		let reached = -1;
+		const step = async (index: number): Promise<unknown> => {
+			if (index <= reached) {
+				throw new Error(
+					`An interceptor of ${call.path} called next() more than once`,
+				);
+			}
+			reached = index;
+			const interceptor = chain[index];
+			if (interceptor === undefined) return invoke();
+			return interceptor(context, () => step(index + 1));
+		};
+
+		try {
+			const reply = await step(0);
+			if (!isRecord(reply)) {
+				throw new TypeError(
+					`An interceptor of ${call.path} returned ${reply === null ? "null" : typeof reply} instead of what next() gave it`,
 				);
 			}
 			return {

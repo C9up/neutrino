@@ -18,3 +18,7 @@ service Echo {
   rpc Say(SayRequest) returns (SayReply);
   rpc Watch(SayRequest) returns (stream SayReply);
 }
+
+service Admin {
+  rpc Ping(SayRequest) returns (SayReply);
+}
