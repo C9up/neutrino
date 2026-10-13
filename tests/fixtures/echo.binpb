@@ -1,0 +1,23 @@
+
+E
+shared/when.protoshared" 
+When
+seconds (Rsecondsbproto3
+Ë
+
+echo.protoechoshared/when.proto"t
+
+SayRequest
+text (	Rtext
+times (Rtimes
+at (2.shared.WhenRat
+tree (2
+.echo.TreeRtree"
+SayReply
+text (	Rtext"(
+Tree 
+child (2
+.echo.TreeRchild2\
+Echo'
+Say.echo.SayRequest.echo.SayReply+
+Watch.echo.SayRequest.echo.SayReply0bproto3

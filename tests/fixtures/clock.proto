@@ -1,0 +1,6 @@
+syntax = "proto3";
+package clock;
+
+import "shared/when.proto";
+
+message Tick { shared.When at = 1; }

@@ -1,0 +1,4 @@
+syntax = "proto3";
+package echo;
+
+message SayReply { int32 code = 1; }

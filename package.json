@@ -10,6 +10,14 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./provider": {
+      "types": "./src/NeutrinoProvider.ts",
+      "import": "./src/NeutrinoProvider.ts"
+    },
+    "./services/main": {
+      "types": "./src/services/main.ts",
+      "import": "./src/services/main.ts"
     }
   },
   "scripts": {
@@ -19,8 +27,12 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.16.0"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
+    "@c9up/ream": "^0.2.26",
     "@types/node": "^22.20.1",
     "@vitest/coverage-v8": "4.1.11",
     "typescript": "^6.0.3",
@@ -43,6 +55,14 @@
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
+      },
+      "./provider": {
+        "types": "./dist/NeutrinoProvider.d.ts",
+        "import": "./dist/NeutrinoProvider.js"
+      },
+      "./services/main": {
+        "types": "./dist/services/main.d.ts",
+        "import": "./dist/services/main.js"
       }
     },
     "access": "public"
@@ -56,6 +76,14 @@
     "overrides": {
       "@vitest/coverage-v8": "4.1.11",
       "vitest": "4.1.11"
+    }
+  },
+  "peerDependencies": {
+    "@c9up/ream": "^0.2.26"
+  },
+  "peerDependenciesMeta": {
+    "@c9up/ream": {
+      "optional": true
     }
   }
 }

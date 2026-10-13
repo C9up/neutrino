@@ -1,0 +1,20 @@
+syntax = "proto3";
+package echo;
+
+import "shared/when.proto";
+
+message SayRequest {
+  string text = 1;
+  uint32 times = 2;
+  shared.When at = 3;
+  Tree tree = 4;
+}
+
+message SayReply { string text = 1; }
+
+message Tree { Tree child = 1; }
+
+service Echo {
+  rpc Say(SayRequest) returns (SayReply);
+  rpc Watch(SayRequest) returns (stream SayReply);
+}
