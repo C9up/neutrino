@@ -13,6 +13,7 @@
  */
 
 import {
+	clone,
 	createFileRegistry,
 	createRegistry,
 	type DescFile,
@@ -25,6 +26,7 @@ import {
 	toBinary,
 } from "@bufbuild/protobuf";
 import {
+	type FileDescriptorProto,
 	FileDescriptorProtoSchema,
 	FileDescriptorSetSchema,
 } from "@bufbuild/protobuf/wkt";
@@ -136,14 +138,15 @@ function readDescriptorSet(bytes: Uint8Array, source: string): Registry {
 /**
  * Throw on a type two sources declare differently. Each type is traced to the
  * file that declares it; the same file twice is fine as long as it is the same
- * file, compared on its serialized descriptor.
+ * file, compared on its serialized descriptor — less what says nothing about
+ * the wire (see {@link schemaBytes}).
  */
 function rejectConflicts(sourced: readonly Sourced[]): void {
 	const seen = new Map<string, { origin: string; proto: Uint8Array }>();
 	for (const { source, registry } of sourced) {
 		for (const type of registry) {
 			const origin = `${type.file.proto.name} (${source})`;
-			const proto = toBinary(FileDescriptorProtoSchema, type.file.proto);
+			const proto = schemaBytes(type.file.proto);
 			const previous = seen.get(type.typeName);
 			if (previous === undefined) {
 				seen.set(type.typeName, { origin, proto });
@@ -152,6 +155,21 @@ function rejectConflicts(sourced: readonly Sourced[]): void {
 			}
 		}
 	}
+}
+
+/**
+ * A file descriptor serialized without what says nothing about the wire: the
+ * source info (positions and comments of the `.proto`), and the unknown fields
+ * of the file itself. `buf build` keeps both by default — the second is its
+ * image extension, field 8042 — where `protoc --descriptor_set_out` and
+ * `protoc-gen-es` keep neither. The same `.proto` through two of those tools
+ * must not read as two different schemas.
+ */
+function schemaBytes(proto: FileDescriptorProto): Uint8Array {
+	const copy = clone(FileDescriptorProtoSchema, proto);
+	copy.sourceCodeInfo = undefined;
+	copy.$unknown = undefined;
+	return toBinary(FileDescriptorProtoSchema, copy);
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {

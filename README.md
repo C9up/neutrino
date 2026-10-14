@@ -49,6 +49,44 @@ raise `InvalidMessageError` (`E_NEUTRINO_INVALID_MESSAGE`), the error a transpor
 answers with a client error. Two sources that declare the same type differently
 raise `DuplicateTypeError` instead of one silently replacing the other.
 
+## Generating code
+
+Typed messages and services come from `protoc-gen-es`, run by `buf` — both
+install from npm, nothing to set up on the machine:
+
+```sh
+pnpm add -D @bufbuild/buf @bufbuild/protoc-gen-es
+```
+
+```yaml
+# buf.yaml
+version: v2
+modules:
+  - path: proto
+```
+
+```yaml
+# buf.gen.yaml
+version: v2
+plugins:
+  - local: protoc-gen-es
+    out: app/generated
+    opt:
+      - target=ts
+      - import_extension=js
+```
+
+```sh
+pnpm buf generate                  # proto/*.proto → app/generated/*_pb.ts
+pnpm buf build -o proto/app.binpb  # the descriptor set, if you load one
+```
+
+It is a step on the server side only: the generated files are ordinary
+modules, committed or rebuilt like any other source, and nothing reaches the
+browser that needs a build to run. Loading the generated files and a
+descriptor set built from the same `.proto` together is fine — they are
+compared on what affects the wire, not on the source positions `buf` keeps.
+
 ## In a Ream application
 
 ```ts
