@@ -140,6 +140,12 @@ grpc.service(EchoService, {
   answered `INTERNAL`), `getMap()` the first value of each. The transport's
   own headers (`content-type`, `te`, `grpc-timeout`, `grpc-encoding`,
   `grpc-accept-encoding`, `accept-encoding`) are not part of it.
+- A client's `grpc-timeout` is enforced: past it the call is answered
+  `DEADLINE_EXCEEDED` (a malformed one, `INTERNAL`). `context.deadline` gives
+  it (`Infinity` without one) and `context.signal` is aborted when the call is
+  answered without the method — deadline passed, or the client cancelled (when
+  the host reports cancellation through `GrpcCall.signal`). Pass the signal on
+  to what the method waits for.
 - A `GrpcError` is answered with its status and message. Any other error is
   answered `INTERNAL` without its message, and reported (to `console.error`
   unless `onError` says otherwise).

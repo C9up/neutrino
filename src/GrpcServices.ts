@@ -85,6 +85,12 @@ export interface GrpcCall {
 	message: Uint8Array;
 	/** Resolved client IP. */
 	ip: string;
+	/**
+	 * Aborted by the host when the client cancels the call or its connection
+	 * drops. The call is then answered CANCELLED and the method's own
+	 * {@link GrpcContext.signal} aborted.
+	 */
+	signal?: AbortSignal;
 }
 
 /** A reply message, encoded — or a status instead of one. */
@@ -100,6 +106,18 @@ export interface GrpcContext {
 	readonly ip: string;
 	/** The method being called. */
 	readonly method: DescMethod;
+	/**
+	 * When the client stops waiting, in epoch milliseconds — from its
+	 * `grpc-timeout`; `Infinity` when it set none. Past it the call is
+	 * answered DEADLINE_EXCEEDED.
+	 */
+	readonly deadline: number;
+	/**
+	 * Aborted when the call is answered without the method: its deadline
+	 * passed, or the client cancelled it. Hand it to the database or HTTP
+	 * call the method waits on. Its `reason` is a {@link GrpcError}.
+	 */
+	readonly signal: AbortSignal;
 }
 
 /**
@@ -188,6 +206,42 @@ function implementationOf(impl: object, name: string): unknown {
 		if (Object.hasOwn(owner, name)) return Reflect.get(impl, name);
 	}
 	return undefined;
+}
+
+/** The longest delay a timer holds; a longer one would fire at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/** `grpc-timeout`: at most 8 digits and a unit, nothing else. */
+const TIMEOUT = /^(\d{1,8})([HMSmun])$/;
+const TIMEOUT_UNIT_MS = new Map([
+	["H", 3_600_000],
+	["M", 60_000],
+	["S", 1000],
+	["m", 1],
+	["u", 0.001],
+	["n", 0.000_001],
+]);
+
+/**
+ * The call's `grpc-timeout`, in whole milliseconds rounded up — a deadline
+ * still in the future must not read as already passed. Its first value, as a
+ * gRPC server reads it.
+ */
+function timeoutOf(headers: GrpcCall["metadata"]): {
+	ms?: number;
+	invalid?: string;
+} {
+	for (const [name, raw] of Object.entries(headers)) {
+		if (name.toLowerCase() !== "grpc-timeout") continue;
+		const value = typeof raw === "string" ? raw : raw[0];
+		if (value === undefined) return {};
+		const match = TIMEOUT.exec(value);
+		const amount = match?.[1];
+		const unit = TIMEOUT_UNIT_MS.get(match?.[2] ?? "");
+		if (amount === undefined || unit === undefined) return { invalid: value };
+		return { ms: Math.ceil(Number(amount) * unit) };
+	}
+	return {};
 }
 
 interface Route {
@@ -306,7 +360,13 @@ export class GrpcServices {
 				details: `Method ${call.path} is not implemented`,
 			};
 		}
-		const { method, run } = route;
+		const timeout = timeoutOf(call.metadata);
+		if (timeout.invalid !== undefined) {
+			return {
+				code: GrpcStatus.INTERNAL,
+				details: `Invalid grpc-timeout value "${timeout.invalid}"`,
+			};
+		}
 		let metadata: GrpcMetadata;
 		try {
 			metadata = new GrpcMetadata(call.metadata);
@@ -314,12 +374,73 @@ export class GrpcServices {
 			if (!(error instanceof InvalidMetadataError)) throw error;
 			return { code: GrpcStatus.INTERNAL, details: error.message };
 		}
-		const context: GrpcContext = { metadata, ip: call.ip, method };
+		if (call.signal?.aborted === true) {
+			return { code: GrpcStatus.CANCELLED, details: "Cancelled" };
+		}
+		if (timeout.ms === 0) {
+			return {
+				code: GrpcStatus.DEADLINE_EXCEEDED,
+				details: "Deadline exceeded",
+			};
+		}
+
+		const controller = new AbortController();
+		const context: GrpcContext = {
+			metadata,
+			ip: call.ip,
+			method: route.method,
+			deadline:
+				timeout.ms === undefined
+					? Number.POSITIVE_INFINITY
+					: Date.now() + timeout.ms,
+			signal: controller.signal,
+		};
+		// Answered as soon as the deadline passes or the client goes away;
+		// the method is told through its signal and whatever it does next is
+		// not waited for.
+		let end: (reply: GrpcReply) => void = () => {};
+		const ended = new Promise<GrpcReply>((resolve) => {
+			end = resolve;
+		});
+		const stop = (code: GrpcStatusCode, details: string) => {
+			if (controller.signal.aborted) return;
+			controller.abort(new GrpcError(code, details));
+			end({ code, details });
+		};
+		const timer =
+			timeout.ms !== undefined && timeout.ms <= MAX_TIMER_MS
+				? setTimeout(
+						() => stop(GrpcStatus.DEADLINE_EXCEEDED, "Deadline exceeded"),
+						timeout.ms,
+					)
+				: undefined;
+		const cancel = () => stop(GrpcStatus.CANCELLED, "Cancelled");
+		call.signal?.addEventListener("abort", cancel, { once: true });
+		try {
+			return await Promise.race([this.#serve(call, route, context), ended]);
+		} finally {
+			clearTimeout(timer);
+			call.signal?.removeEventListener("abort", cancel);
+		}
+	};
+
+	/** Run the interceptors and the method, and encode what they answer. */
+	async #serve(
+		call: GrpcCall,
+		route: Route,
+		context: GrpcContext,
+	): Promise<GrpcReply> {
+		const { method, run } = route;
 		const chain = [...this.#interceptors, ...route.interceptors];
 
 		// The method itself: decode, run, check what it returned. Innermost, so
 		// an interceptor that refuses the call keeps its bytes from being read.
 		const invoke = async (): Promise<Record<string, unknown>> => {
+			if (context.signal.aborted) {
+				// Its reason is the GrpcError the call was answered with.
+				const reason: unknown = context.signal.reason;
+				throw reason;
+			}
 			let request: Message;
 			try {
 				request = this.#protobuf.decode(method.input, call.message, {
@@ -371,8 +492,10 @@ export class GrpcServices {
 			if (error instanceof GrpcError) {
 				return { code: error.status, details: error.message };
 			}
-			this.#onError(error, { path: call.path });
+			// Already answered DEADLINE_EXCEEDED or CANCELLED: what a method
+			// throws while it stops is not a failure to report.
+			if (!context.signal.aborted) this.#onError(error, { path: call.path });
 			return { code: GrpcStatus.INTERNAL, details: "Internal error" };
 		}
-	};
+	}
 }
