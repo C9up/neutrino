@@ -48,6 +48,15 @@ export interface ProtobufSources {
 	files?: readonly DescFile[];
 }
 
+export interface DecodeOptions {
+	/**
+	 * Keep the fields the schema does not know, so that encoding the message
+	 * again gives them back. Default: `true`. Each one is kept as an object of
+	 * its own, so on untrusted bytes this costs up to ~80 times their size.
+	 */
+	readUnknownFields?: boolean;
+}
+
 export class Protobuf {
 	readonly #registry: Registry;
 
@@ -104,9 +113,12 @@ export class Protobuf {
 	decode<Desc extends DescMessage>(
 		schema: Desc,
 		bytes: Uint8Array,
+		options: DecodeOptions = {},
 	): MessageShape<Desc> {
 		try {
-			return fromBinary(schema, bytes);
+			return fromBinary(schema, bytes, {
+				readUnknownFields: options.readUnknownFields ?? true,
+			});
 		} catch (error) {
 			throw new InvalidMessageError(schema.typeName, { cause: error });
 		}

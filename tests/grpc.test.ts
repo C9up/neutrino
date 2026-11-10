@@ -8,6 +8,7 @@ import {
 	GrpcError,
 	type GrpcReply,
 	GrpcServices,
+	type GrpcServicesOptions,
 	GrpcStatus,
 	Protobuf,
 	UnknownTypeError,
@@ -180,6 +181,43 @@ describe("GrpcServices — calls", () => {
 		expect(await grpc.handle(call("/other.Svc/Say", "a"))).toMatchObject({
 			code: GrpcStatus.UNIMPLEMENTED,
 		});
+	});
+});
+
+describe("GrpcServices — unknown fields of a request", () => {
+	// 4 MiB of field 15 = 0: two bytes each, two million fields a decoder
+	// that keeps them turns into two million objects.
+	const flood = new Uint8Array(4 * 1024 * 1024 - 16);
+	for (let i = 0; i + 1 < flood.length; i += 2) flood[i] = 0x78;
+
+	function capture(options: GrpcServicesOptions = {}) {
+		const seen: unknown[] = [];
+		const grpc = new GrpcServices(protobuf, options).service(Echo, {
+			say: (request) => {
+				seen.push(request.$unknown);
+				return { text: "ok" };
+			},
+		});
+		return { grpc, seen };
+	}
+
+	it("drops them by default, so a request holds no more than its known fields", async () => {
+		const { grpc, seen } = capture();
+		const reply = await grpc.handle(
+			call("/echo.Echo/Say", "", { message: flood }),
+		);
+		expect("message" in reply).toBe(true);
+		expect(seen).toEqual([undefined]);
+	});
+
+	it("keeps them when the app opts in", async () => {
+		const { grpc, seen } = capture({ keepUnknownFields: true });
+		await grpc.handle(
+			call("/echo.Echo/Say", "", {
+				message: Uint8Array.from([0x0a, 0x01, 0x61, 0x78, 0x00]),
+			}),
+		);
+		expect(seen).toEqual([[{ no: 15, wireType: 0, data: Uint8Array.of(0) }]]);
 	});
 });
 

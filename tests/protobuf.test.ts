@@ -63,6 +63,19 @@ describe("Protobuf — codec", () => {
 		);
 	});
 
+	it("drops the fields it does not know when told to", () => {
+		const protobuf = echo();
+		const schema = protobuf.message("echo.SayReply");
+		const bytes = Uint8Array.from([0x0a, 0x01, 0x61, 0x4a, 0x02, 0x6e, 0x65]);
+		const decoded = protobuf.decode(schema, bytes, {
+			readUnknownFields: false,
+		});
+		expect(decoded.$unknown).toBeUndefined();
+		expect(protobuf.encode(schema, decoded)).toEqual(
+			Uint8Array.from([0x0a, 0x01, 0x61]),
+		);
+	});
+
 	it("names an unknown type", () => {
 		const error = (() => {
 			try {

@@ -25,8 +25,9 @@ Neutrino reads compiled schemas, not `.proto` text:
   also give you typed messages.
 
 Messages are [`@bufbuild/protobuf`](https://github.com/bufbuild/protobuf-es)
-messages: no code generated at runtime, unknown fields kept, a recursion limit
-on decode.
+messages: no code generated at runtime, unknown fields kept (unless
+`decode(schema, bytes, { readUnknownFields: false })`), a recursion limit on
+decode.
 
 ## Use
 
@@ -139,6 +140,10 @@ grpc.service(EchoService, {
   unless `onError` says otherwise).
 - Unary methods only: implementing a streaming method is refused at
   registration.
+- A request is decoded **without** the fields its schema does not know: each
+  one would cost an object, so a 4 MiB request of them would hold ~300 MB.
+  `new GrpcServices(protobuf, { keepUnknownFields: true })` keeps them, for a
+  method that forwards its request elsewhere.
 
 ### Interceptors
 

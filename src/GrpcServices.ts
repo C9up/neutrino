@@ -193,6 +193,14 @@ export interface GrpcServicesOptions {
 	 * — the ones the client only sees as INTERNAL. Default: `console.error`.
 	 */
 	onError?: (error: unknown, call: { path: string }) => void;
+	/**
+	 * Keep the fields of a request its schema does not know. Default: `false`
+	 * — unlike a plain {@link Protobuf.decode}: each one costs an object, so a
+	 * 4 MiB request of two-byte unknown fields would hold ~300 MB, and the
+	 * reply is built from the method's return value anyway, never from the
+	 * request. Turn it on for a method that forwards its request elsewhere.
+	 */
+	keepUnknownFields?: boolean;
 }
 
 export class GrpcServices {
@@ -201,9 +209,11 @@ export class GrpcServices {
 	readonly #services = new Set<string>();
 	readonly #interceptors: GrpcInterceptor[] = [];
 	readonly #onError: (error: unknown, call: { path: string }) => void;
+	readonly #keepUnknownFields: boolean;
 
 	constructor(protobuf: Protobuf, options: GrpcServicesOptions = {}) {
 		this.#protobuf = protobuf;
+		this.#keepUnknownFields = options.keepUnknownFields ?? false;
 		this.#onError =
 			options.onError ??
 			((error, call) => console.error(`[grpc] ${call.path} failed`, error));
@@ -300,7 +310,9 @@ export class GrpcServices {
 		const invoke = async (): Promise<Record<string, unknown>> => {
 			let request: Message;
 			try {
-				request = this.#protobuf.decode(method.input, call.message);
+				request = this.#protobuf.decode(method.input, call.message, {
+					readUnknownFields: this.#keepUnknownFields,
+				});
 			} catch {
 				// decode reports every malformed input the same way.
 				throw new GrpcError(

@@ -31,4 +31,8 @@ export {
 	rateLimit,
 	type TokenVerifier,
 } from "./interceptors.js";
-export { Protobuf, type ProtobufSources } from "./Protobuf.js";
+export {
+	type DecodeOptions,
+	Protobuf,
+	type ProtobufSources,
+} from "./Protobuf.js";
