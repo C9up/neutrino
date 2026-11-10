@@ -35,9 +35,21 @@ interface NeutrinoContainer {
 	has?(token: unknown): boolean;
 }
 
+/**
+ * The message limits handed to the host with the handler, so that it can
+ * refuse a larger message before reading it all.
+ */
+interface GrpcHostLimits {
+	maxReceiveMessageLength?: number;
+	maxSendMessageLength?: number;
+}
+
 /** The part of the host's server neutrino uses — ream's `server.grpc()`. */
 interface GrpcHost {
-	grpc(handler: (call: GrpcCall) => Promise<GrpcReply>): unknown;
+	grpc(
+		handler: (call: GrpcCall) => Promise<GrpcReply>,
+		limits: GrpcHostLimits,
+	): unknown;
 }
 
 function isGrpcHost(value: unknown): value is GrpcHost {
@@ -59,9 +71,11 @@ function isProtobufConfig(value: unknown): value is ProtobufConfig {
 	if (typeof value !== "object" || value === null) return false;
 	const sets = Reflect.get(value, "descriptorSets");
 	const files = Reflect.get(value, "files");
+	const grpc = Reflect.get(value, "grpc");
 	return (
 		(sets === undefined || Array.isArray(sets)) &&
-		(files === undefined || Array.isArray(files))
+		(files === undefined || Array.isArray(files)) &&
+		(grpc === undefined || (typeof grpc === "object" && grpc !== null))
 	);
 }
 
@@ -76,15 +90,7 @@ export default class NeutrinoProvider {
 
 	register(): void {
 		this.#app.container.singleton(Protobuf, () => {
-			const raw = this.#app.config.get("protobuf");
-			if (raw === undefined) {
-				throw new Error("[protobuf] missing config/protobuf.ts");
-			}
-			if (!isProtobufConfig(raw)) {
-				throw new Error(
-					"[protobuf] config/protobuf.ts must export defineConfig({ descriptorSets, files }).",
-				);
-			}
+			const raw = this.#config();
 			return new Protobuf({
 				descriptorSets: (raw.descriptorSets ?? []).map((path) =>
 					readFileSync(path),
@@ -98,7 +104,7 @@ export default class NeutrinoProvider {
 
 		this.#app.container.singleton(
 			GrpcServices,
-			async () => new GrpcServices(await this.#resolve()),
+			async () => new GrpcServices(await this.#resolve(), this.#config().grpc),
 		);
 		const resolveGrpc = (): Promise<GrpcServices> => this.#resolveGrpc();
 		this.#app.container.singleton("neutrino.grpc", resolveGrpc);
@@ -144,7 +150,22 @@ export default class NeutrinoProvider {
 				"Neutrino: this server cannot serve gRPC — it has no grpc() method. Upgrade @c9up/ream.",
 			);
 		}
-		server.grpc(grpc.handle);
+		const { maxReceiveMessageLength, maxSendMessageLength } =
+			this.#config().grpc ?? {};
+		server.grpc(grpc.handle, { maxReceiveMessageLength, maxSendMessageLength });
+	}
+
+	#config(): ProtobufConfig {
+		const raw = this.#app.config.get("protobuf");
+		if (raw === undefined) {
+			throw new Error("[protobuf] missing config/protobuf.ts");
+		}
+		if (!isProtobufConfig(raw)) {
+			throw new Error(
+				"[protobuf] config/protobuf.ts must export defineConfig({ descriptorSets, files }).",
+			);
+		}
+		return raw;
 	}
 
 	async #resolveGrpc(): Promise<GrpcServices> {

@@ -264,6 +264,40 @@ export interface GrpcServicesOptions {
 	 * request. Turn it on for a method that forwards its request elsewhere.
 	 */
 	keepUnknownFields?: boolean;
+	/**
+	 * The largest request message accepted, in bytes; a larger one is
+	 * answered RESOURCE_EXHAUSTED before any interceptor runs. `-1` for no
+	 * limit. Default: 4 MiB.
+	 */
+	maxReceiveMessageLength?: number;
+	/**
+	 * The largest reply message sent, in bytes; a method whose reply is larger
+	 * is answered RESOURCE_EXHAUSTED instead. Default: `-1`, no limit.
+	 */
+	maxSendMessageLength?: number;
+}
+
+const DEFAULT_MAX_RECEIVE_MESSAGE_LENGTH = 4 * 1024 * 1024;
+
+/** A byte count, or `-1` for none: anything else is a configuration error. */
+function messageLimit(
+	name: string,
+	value: number | undefined,
+	fallback: number,
+): number {
+	if (value === undefined) return fallback;
+	if (!Number.isSafeInteger(value) || value < -1) {
+		throw new NeutrinoError(
+			"E_NEUTRINO_INVALID_OPTION",
+			`Neutrino: ${name} must be a whole number of bytes, or -1 for no limit — got ${value}`,
+		);
+	}
+	return value;
+}
+
+/** Whether `length` is past `limit` (`-1`: never). */
+function exceeds(length: number, limit: number): boolean {
+	return limit !== -1 && length > limit;
 }
 
 export class GrpcServices {
@@ -273,10 +307,22 @@ export class GrpcServices {
 	readonly #interceptors: GrpcInterceptor[] = [];
 	readonly #onError: (error: unknown, call: { path: string }) => void;
 	readonly #keepUnknownFields: boolean;
+	readonly #maxReceive: number;
+	readonly #maxSend: number;
 
 	constructor(protobuf: Protobuf, options: GrpcServicesOptions = {}) {
 		this.#protobuf = protobuf;
 		this.#keepUnknownFields = options.keepUnknownFields ?? false;
+		this.#maxReceive = messageLimit(
+			"maxReceiveMessageLength",
+			options.maxReceiveMessageLength,
+			DEFAULT_MAX_RECEIVE_MESSAGE_LENGTH,
+		);
+		this.#maxSend = messageLimit(
+			"maxSendMessageLength",
+			options.maxSendMessageLength,
+			-1,
+		);
 		this.#onError =
 			options.onError ??
 			((error, call) => console.error(`[grpc] ${call.path} failed`, error));
@@ -358,6 +404,12 @@ export class GrpcServices {
 			return {
 				code: GrpcStatus.UNIMPLEMENTED,
 				details: `Method ${call.path} is not implemented`,
+			};
+		}
+		if (exceeds(call.message.length, this.#maxReceive)) {
+			return {
+				code: GrpcStatus.RESOURCE_EXHAUSTED,
+				details: `Received message larger than max (${call.message.length} vs ${this.#maxReceive})`,
 			};
 		}
 		const timeout = timeoutOf(call.metadata);
@@ -482,12 +534,17 @@ export class GrpcServices {
 					`An interceptor of ${call.path} returned ${reply === null ? "null" : typeof reply} instead of what next() gave it`,
 				);
 			}
-			return {
-				message: this.#protobuf.encode(
-					method.output,
-					create(method.output, reply),
-				),
-			};
+			const message = this.#protobuf.encode(
+				method.output,
+				create(method.output, reply),
+			);
+			if (exceeds(message.length, this.#maxSend)) {
+				return {
+					code: GrpcStatus.RESOURCE_EXHAUSTED,
+					details: `Sent message larger than max (${message.length} vs. ${this.#maxSend})`,
+				};
+			}
+			return { message };
 		} catch (error) {
 			if (error instanceof GrpcError) {
 				return { code: error.status, details: error.message };

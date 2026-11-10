@@ -106,6 +106,23 @@ The schemas load at boot, so a missing file or a conflict stops the start
 rather than the first request. The instance is bound as `protobuf` and is
 reachable from `@c9up/neutrino/services/main`.
 
+The gRPC calls served take their options from the same file:
+
+```ts
+export default defineConfig({
+  descriptorSets: [app.makePath("proto/app.binpb")],
+  grpc: {
+    maxReceiveMessageLength: 1024 * 1024, // default 4 MiB; -1: no limit
+    maxSendMessageLength: 8 * 1024 * 1024, // default -1: no limit
+    keepUnknownFields: false,              // the default
+  },
+})
+```
+
+A request or a reply past its limit is answered `RESOURCE_EXHAUSTED`; the
+request before any interceptor runs. The limits are also handed to the host's
+server with the dispatcher, for it to refuse a larger message before reading it.
+
 ## gRPC
 
 Services implemented in TypeScript are served on the application's HTTP port:

@@ -173,6 +173,60 @@ describe("NeutrinoProvider — gRPC", () => {
 		expect(reply).toHaveProperty("message");
 	});
 
+	it("applies the gRPC options of the config, and hands the message limits to the server", async () => {
+		const received: unknown[][] = [];
+		const server = {
+			grpc: (...args: unknown[]) => received.push(args),
+		};
+		const { container, provider } = boot(
+			defineConfig({
+				descriptorSets: [fixturePath("echo")],
+				grpc: { maxReceiveMessageLength: 4, maxSendMessageLength: 1024 },
+			}),
+			server,
+		);
+		current = provider;
+		await provider.boot();
+		expect(received[0]?.[1]).toEqual({
+			maxReceiveMessageLength: 4,
+			maxSendMessageLength: 1024,
+		});
+		const services = await container.resolve(GrpcServices);
+		if (!(services instanceof GrpcServices)) throw new Error("no GrpcServices");
+		services.service(protobuf.service("echo.Echo"), {
+			say: () => ({ text: "hi" }),
+		});
+		expect(
+			await services.handle({
+				path: "/echo.Echo/Say",
+				metadata: {},
+				ip: "127.0.0.1",
+				message: new Uint8Array(5),
+			}),
+		).toMatchObject({ code: 8 });
+	});
+
+	it("fails at boot on a gRPC limit that is not a byte count", async () => {
+		const { provider } = boot(
+			defineConfig({
+				descriptorSets: [fixturePath("echo")],
+				grpc: { maxReceiveMessageLength: Number.NaN },
+			}),
+			{ grpc: () => {} },
+		);
+		await expect(provider.boot()).rejects.toMatchObject({
+			code: "E_NEUTRINO_INVALID_OPTION",
+		});
+	});
+
+	it("fails at boot on gRPC options that are not an object", async () => {
+		const { provider } = boot({
+			descriptorSets: [fixturePath("echo")],
+			grpc: "fast",
+		});
+		await expect(provider.boot()).rejects.toThrow(/must export defineConfig/);
+	});
+
 	it("refuses a server that cannot serve gRPC instead of ignoring it", async () => {
 		const { provider } = boot(config(), { use: () => {} });
 		await expect(provider.boot()).rejects.toMatchObject({

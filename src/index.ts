@@ -1,6 +1,10 @@
 import "./augmentations.js";
 
-export { defineConfig, type ProtobufConfig } from "./config.js";
+export {
+	defineConfig,
+	type GrpcConfig,
+	type ProtobufConfig,
+} from "./config.js";
 export {
 	DuplicateTypeError,
 	InvalidDescriptorError,
