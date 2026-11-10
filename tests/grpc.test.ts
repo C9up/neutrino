@@ -78,7 +78,7 @@ describe("GrpcServices — calls", () => {
 		await grpc.handle(
 			call("/echo.Echo/Say", "x", { metadata: { authorization: "Bearer t" } }),
 		);
-		expect(seen?.metadata.authorization).toBe("Bearer t");
+		expect(seen?.metadata.get("authorization")).toEqual(["Bearer t"]);
 		expect(seen?.ip).toBe("203.0.113.7");
 		expect(seen?.method.name).toBe("Say");
 	});

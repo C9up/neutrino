@@ -122,7 +122,7 @@ import { EchoService } from "#generated/echo_pb.js"
 
 grpc.service(EchoService, {
   async say(request, context) {
-    if (!context.metadata.authorization) {
+    if (context.metadata.get("authorization").length === 0) {
       throw new GrpcError(GrpcStatus.UNAUTHENTICATED, "sign in first")
     }
     return { text: request.text }
@@ -135,6 +135,11 @@ grpc.service(EchoService, {
   `protobuf.service("echo.Echo")`.
 - The middleware and the router never see a gRPC call: protect it with
   interceptors (below).
+- `context.metadata` is the call's metadata: `get(key)` gives every value of
+  a key (`-bin` keys decoded to `Uint8Array`, a value that is not base64
+  answered `INTERNAL`), `getMap()` the first value of each. The transport's
+  own headers (`content-type`, `te`, `grpc-timeout`, `grpc-encoding`,
+  `grpc-accept-encoding`, `accept-encoding`) are not part of it.
 - A `GrpcError` is answered with its status and message. Any other error is
   answered `INTERNAL` without its message, and reported (to `console.error`
   unless `onError` says otherwise).
@@ -175,7 +180,8 @@ grpc.service(
 ```
 
 `bearerAuth` answers `UNAUTHENTICATED` to a call without a valid
-`authorization: Bearer <token>`, and `signedIn.user(context)` fails closed in a
+`authorization: Bearer <token>` — or carrying two `authorization` values —
+and `signedIn.user(context)` fails closed in a
 method it did not protect. `rateLimit` answers `RESOURCE_EXHAUSTED`.
 
 In production, terminate TLS at the reverse proxy and forward gRPC as

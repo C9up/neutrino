@@ -26,7 +26,12 @@ import {
 	type MessageInitShape,
 	type MessageShape,
 } from "@bufbuild/protobuf";
-import { NeutrinoError, UnknownMethodError } from "./errors.js";
+import {
+	InvalidMetadataError,
+	NeutrinoError,
+	UnknownMethodError,
+} from "./errors.js";
+import { GrpcMetadata } from "./GrpcMetadata.js";
 import type { Protobuf } from "./Protobuf.js";
 
 /** gRPC status codes. */
@@ -70,8 +75,12 @@ export class GrpcError extends NeutrinoError {
 export interface GrpcCall {
 	/** `/package.Service/Method`. */
 	path: string;
-	/** Request metadata, header names lowercased. */
-	metadata: Record<string, string>;
+	/**
+	 * The request headers, a repeated one as a list (a host that keeps only
+	 * one value per name gives strings). Transport headers are left out of
+	 * what the method sees; see {@link GrpcMetadata}.
+	 */
+	metadata: Readonly<Record<string, string | readonly string[]>>;
 	/** The request message, still encoded. */
 	message: Uint8Array;
 	/** Resolved client IP. */
@@ -85,8 +94,8 @@ export type GrpcReply =
 
 /** What a method implementation receives beside the request. */
 export interface GrpcContext {
-	/** Request metadata — `authorization` and the like — names lowercased. */
-	readonly metadata: Readonly<Record<string, string>>;
+	/** Request metadata — `authorization` and the like. */
+	readonly metadata: GrpcMetadata;
 	/** Resolved client IP. */
 	readonly ip: string;
 	/** The method being called. */
@@ -298,11 +307,14 @@ export class GrpcServices {
 			};
 		}
 		const { method, run } = route;
-		const context: GrpcContext = {
-			metadata: call.metadata,
-			ip: call.ip,
-			method,
-		};
+		let metadata: GrpcMetadata;
+		try {
+			metadata = new GrpcMetadata(call.metadata);
+		} catch (error) {
+			if (!(error instanceof InvalidMetadataError)) throw error;
+			return { code: GrpcStatus.INTERNAL, details: error.message };
+		}
+		const context: GrpcContext = { metadata, ip: call.ip, method };
 		const chain = [...this.#interceptors, ...route.interceptors];
 
 		// The method itself: decode, run, check what it returned. Innermost, so

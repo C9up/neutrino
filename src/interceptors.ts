@@ -82,7 +82,17 @@ export function bearerAuth<User>(
 	const users = new GrpcContextKey<User | undefined>(undefined);
 	return {
 		async interceptor(context, next) {
-			const token = BEARER.exec(context.metadata.authorization ?? "")?.[1];
+			const values = context.metadata.get("authorization");
+			if (values.length > 1) {
+				// Which one a proxy checked is anyone's guess: refuse both.
+				throw new GrpcError(
+					GrpcStatus.UNAUTHENTICATED,
+					"Several authorization values",
+				);
+			}
+			const [value] = values;
+			const token =
+				typeof value === "string" ? BEARER.exec(value)?.[1] : undefined;
 			if (token === undefined) {
 				throw new GrpcError(GrpcStatus.UNAUTHENTICATED, "Missing bearer token");
 			}

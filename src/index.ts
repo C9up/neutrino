@@ -5,10 +5,12 @@ export {
 	DuplicateTypeError,
 	InvalidDescriptorError,
 	InvalidMessageError,
+	InvalidMetadataError,
 	NeutrinoError,
 	UnknownMethodError,
 	UnknownTypeError,
 } from "./errors.js";
+export { GrpcMetadata, type MetadataValue } from "./GrpcMetadata.js";
 export {
 	type GrpcCall,
 	type GrpcContext,

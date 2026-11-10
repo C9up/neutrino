@@ -78,3 +78,16 @@ export class InvalidMessageError extends NeutrinoError {
 		);
 	}
 }
+
+/**
+ * Raised when a call's `-bin` metadata value is not base64. A transport
+ * answers it INTERNAL, as it does a malformed `grpc-timeout`.
+ */
+export class InvalidMetadataError extends NeutrinoError {
+	readonly key: string;
+
+	constructor(key: string) {
+		super("E_NEUTRINO_INVALID_METADATA", `Invalid binary metadata "${key}"`);
+		this.key = key;
+	}
+}
