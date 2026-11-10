@@ -161,6 +161,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
+/**
+ * The member `name` of an implementation, read through its prototypes — a
+ * class instance keeps its methods there, out of reach of Object.entries —
+ * but never from Object.prototype or Function.prototype: protobuf-es leaves
+ * `rpc HasOwnProperty` as `hasOwnProperty`, which every object would
+ * otherwise "implement".
+ */
+function implementationOf(impl: object, name: string): unknown {
+	for (
+		let owner: object | null = impl;
+		owner !== null &&
+		owner !== Object.prototype &&
+		owner !== Function.prototype;
+		owner = Reflect.getPrototypeOf(owner)
+	) {
+		if (Object.hasOwn(owner, name)) return Reflect.get(impl, name);
+	}
+	return undefined;
+}
+
 interface Route {
 	method: DescMethod;
 	run: (request: Message, context: GrpcContext) => unknown;
@@ -226,9 +246,7 @@ export class GrpcServices {
 
 		const routes: [string, Route][] = [];
 		for (const method of service.methods) {
-			// Read through the prototype: a class instance keeps its methods
-			// there, out of reach of Object.entries.
-			const implementation: unknown = Reflect.get(impl, method.localName);
+			const implementation = implementationOf(impl, method.localName);
 			if (implementation === undefined) continue;
 			const path = `/${service.typeName}/${method.name}`;
 			if (!isCallable(implementation)) {

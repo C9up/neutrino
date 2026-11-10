@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { create } from "@bufbuild/protobuf";
+import { create, toBinary } from "@bufbuild/protobuf";
+import { FileDescriptorSetSchema } from "@bufbuild/protobuf/wkt";
 import { describe, expect, it, vi } from "vitest";
 import {
 	type GrpcCall,
@@ -228,3 +229,110 @@ describe("GrpcServices — registration", () => {
 		expect(() => protobuf.service("echo.Nope")).toThrow(UnknownTypeError);
 	});
 });
+
+describe("GrpcServices — methods named like Object.prototype members", () => {
+	// protobuf-es only escapes constructor/toString/toJSON/valueOf in a local
+	// name, so these reach the implementation lookup as they are.
+	const names = protobufWithMethods([
+		"Say",
+		"HasOwnProperty",
+		"ToLocaleString",
+		"__defineGetter__",
+		"IsPrototypeOf",
+	]);
+	const Svc = names.service("p.Svc");
+	const empty = { path: "", metadata: {}, ip: "x", message: new Uint8Array() };
+
+	it("answers UNIMPLEMENTED to one the app left out, without reporting an error", async () => {
+		const reported: unknown[] = [];
+		const grpc = new GrpcServices(names, {
+			onError: (error) => reported.push(error),
+		}).service(Svc, { say: () => ({ text: "hi" }) });
+		for (const method of [
+			"HasOwnProperty",
+			"ToLocaleString",
+			"__defineGetter__",
+			"IsPrototypeOf",
+		]) {
+			expect(await grpc.handle({ ...empty, path: `/p.Svc/${method}` })).toEqual(
+				{
+					code: GrpcStatus.UNIMPLEMENTED,
+					details: `Method /p.Svc/${method} is not implemented`,
+				},
+			);
+		}
+		expect(reported).toEqual([]);
+	});
+
+	it("leaves out the members of Object.prototype for a class instance too", async () => {
+		class SvcImpl {
+			say() {
+				return { text: "hi" };
+			}
+		}
+		const grpc = new GrpcServices(names).service(Svc, new SvcImpl());
+		expect(
+			await grpc.handle({ ...empty, path: "/p.Svc/HasOwnProperty" }),
+		).toMatchObject({ code: GrpcStatus.UNIMPLEMENTED });
+	});
+
+	it("serves one the app implements, on a class or inherited from its base", async () => {
+		class Base {
+			hasOwnProperty() {
+				return { text: "own" };
+			}
+		}
+		class SvcImpl extends Base {
+			override toLocaleString() {
+				return { text: "locale" };
+			}
+		}
+		const grpc = new GrpcServices(names).service(Svc, new SvcImpl());
+		const text = (reply: GrpcReply) =>
+			"message" in reply
+				? Reflect.get(
+						names.decode(names.message("p.Req"), reply.message),
+						"text",
+					)
+				: reply.code;
+		expect(
+			text(await grpc.handle({ ...empty, path: "/p.Svc/HasOwnProperty" })),
+		).toBe("own");
+		expect(
+			text(await grpc.handle({ ...empty, path: "/p.Svc/ToLocaleString" })),
+		).toBe("locale");
+	});
+});
+
+function protobufWithMethods(methods: readonly string[]): Protobuf {
+	const set = create(FileDescriptorSetSchema, {
+		file: [
+			{
+				name: "p.proto",
+				package: "p",
+				syntax: "proto3",
+				messageType: [
+					{
+						name: "Req",
+						field: [
+							{ name: "text", number: 1, type: 9, label: 1, jsonName: "text" },
+						],
+					},
+				],
+				service: [
+					{
+						name: "Svc",
+						method: methods.map((name) => ({
+							name,
+							inputType: ".p.Req",
+							outputType: ".p.Req",
+						})),
+					},
+				],
+			},
+		],
+	});
+	return new Protobuf({
+		descriptorSets: [toBinary(FileDescriptorSetSchema, set)],
+	});
+}
