@@ -228,6 +228,47 @@ describe("GrpcServices — registration", () => {
 		).toThrow(expect.objectContaining({ code: "E_NEUTRINO_UNKNOWN_METHOD" }));
 	});
 
+	it("refuses a misspelt method of a class, where it sits on the prototype", () => {
+		class EchoImpl {
+			sya(request: unknown) {
+				return repeat(request);
+			}
+		}
+		expect(() =>
+			new GrpcServices(protobuf).service(Echo, new EchoImpl()),
+		).toThrow(
+			expect.objectContaining({
+				code: "E_NEUTRINO_UNKNOWN_METHOD",
+				message: 'Neutrino: no method "/echo.Echo/sya" is loaded',
+			}),
+		);
+		// Inherited from a base class, the typo is refused the same way.
+		class Base {
+			sya(request: unknown) {
+				return repeat(request);
+			}
+		}
+		class Derived extends Base {}
+		expect(() =>
+			new GrpcServices(protobuf).service(Echo, new Derived()),
+		).toThrow(expect.objectContaining({ code: "E_NEUTRINO_UNKNOWN_METHOD" }));
+	});
+
+	it("does not take a class's constructor or what every object inherits for a method", () => {
+		class EchoImpl {
+			say(request: unknown) {
+				return repeat(request);
+			}
+		}
+		class Derived extends EchoImpl {}
+		expect(() =>
+			new GrpcServices(protobuf).service(Echo, new Derived()),
+		).not.toThrow();
+		expect(() =>
+			new GrpcServices(protobuf).service(Echo, Object.create(null)),
+		).not.toThrow();
+	});
+
 	it("refuses a streaming method instead of answering it wrong", () => {
 		expect(() =>
 			new GrpcServices(protobuf).service(Echo, { watch: repeat }),

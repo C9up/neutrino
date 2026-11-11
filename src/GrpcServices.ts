@@ -189,13 +189,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The member `name` of an implementation, read through its prototypes — a
- * class instance keeps its methods there, out of reach of Object.entries —
- * but never from Object.prototype or Function.prototype: protobuf-es leaves
- * `rpc HasOwnProperty` as `hasOwnProperty`, which every object would
- * otherwise "implement".
+ * The objects an implementation's members are read from: the object, then
+ * its prototypes — a class instance keeps its methods there, out of reach of
+ * Object.entries — but never Object.prototype or Function.prototype:
+ * protobuf-es leaves `rpc HasOwnProperty` as `hasOwnProperty`, which every
+ * object would otherwise "implement".
  */
-function implementationOf(impl: object, name: string): unknown {
+function ownersOf(impl: object): object[] {
+	const owners: object[] = [];
 	for (
 		let owner: object | null = impl;
 		owner !== null &&
@@ -203,9 +204,32 @@ function implementationOf(impl: object, name: string): unknown {
 		owner !== Function.prototype;
 		owner = Reflect.getPrototypeOf(owner)
 	) {
-		if (Object.hasOwn(owner, name)) return Reflect.get(impl, name);
+		owners.push(owner);
 	}
-	return undefined;
+	return owners;
+}
+
+/** The member `name` of an implementation, read where a method may live. */
+function implementationOf(impl: object, name: string): unknown {
+	return ownersOf(impl).some((owner) => Object.hasOwn(owner, name))
+		? Reflect.get(impl, name)
+		: undefined;
+}
+
+/**
+ * Every name an implementation offers a function under, found where
+ * {@link implementationOf} looks: its own keys, enumerable or not, and those
+ * of its prototypes, but not the `constructor` a class prototype carries.
+ */
+function functionNamesOf(impl: object): Set<string> {
+	const names = new Set<string>();
+	for (const owner of ownersOf(impl)) {
+		for (const key of Object.getOwnPropertyNames(owner)) {
+			if (owner !== impl && key === "constructor") continue;
+			if (isCallable(Reflect.get(impl, key))) names.add(key);
+		}
+	}
+	return names;
 }
 
 /** The longest delay a timer holds; a longer one would fire at once. */
@@ -341,8 +365,10 @@ export class GrpcServices {
 	/**
 	 * Serve a service. Refused, at registration: a function-valued key that is
 	 * not one of the service's methods (a typo would otherwise answer
-	 * UNIMPLEMENTED forever), a method implemented by something that is not a
-	 * function, a streaming method, and a service registered twice.
+	 * UNIMPLEMENTED forever) — an object's own or, for a class instance, one
+	 * of its class's or a base class's methods, so a helper a class keeps
+	 * belongs in a `#private` method — a method implemented by something that
+	 * is not a function, a streaming method, and a service registered twice.
 	 */
 	service<S extends DescService>(
 		service: S,
@@ -357,8 +383,8 @@ export class GrpcServices {
 			);
 		}
 		const names = new Set(service.methods.map((method) => method.localName));
-		for (const [key, value] of Object.entries(impl)) {
-			if (typeof value === "function" && !names.has(key)) {
+		for (const key of functionNamesOf(impl)) {
+			if (!names.has(key)) {
 				throw new UnknownMethodError(`/${service.typeName}/${key}`);
 			}
 		}
