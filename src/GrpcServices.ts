@@ -476,14 +476,15 @@ export class GrpcServices {
 		// Answered as soon as the deadline passes or the client goes away;
 		// the method is told through its signal and whatever it does next is
 		// not waited for.
-		let end: (reply: GrpcReply) => void = () => {};
+		// The executor runs at once, so `end` is set before anything calls it.
+		let end: ((reply: GrpcReply) => void) | undefined;
 		const ended = new Promise<GrpcReply>((resolve) => {
 			end = resolve;
 		});
 		const stop = (code: GrpcStatusCode, details: string) => {
 			if (controller.signal.aborted) return;
 			controller.abort(new GrpcError(code, details));
-			end({ code, details });
+			end?.({ code, details });
 		};
 		const timer =
 			timeout.ms !== undefined && timeout.ms <= MAX_TIMER_MS
