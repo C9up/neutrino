@@ -114,6 +114,7 @@ export default defineConfig({
   grpc: {
     maxReceiveMessageLength: 1024 * 1024, // default 4 MiB; -1: no limit
     maxSendMessageLength: 8 * 1024 * 1024, // default -1: no limit
+    maxInFlightRequestBytes: 16 * 1024 * 1024, // default 8 MiB; -1: no limit
     keepUnknownFields: false,              // the default
   },
 })
@@ -122,6 +123,16 @@ export default defineConfig({
 A request or a reply past its limit is answered `RESOURCE_EXHAUSTED`; the
 request before any interceptor runs. The limits are also handed to the host's
 server with the dispatcher, for it to refuse a larger message before reading it.
+
+`maxInFlightRequestBytes` bounds the request bytes decoded and held at once,
+over every call whose method has not finished: a decoded request is far larger
+than its bytes (each element of a repeated message field is a full object, some
+280 MB of heap for a 4 MiB request of empty elements), so the message limit
+alone lets a few concurrent calls exhaust the process. A call past the bound is
+answered `RESOURCE_EXHAUSTED` before any interceptor runs; a call is always
+admitted when nothing else is in flight, and one answered at its deadline stays
+counted until its method stops. grpc-js only bounds a connection (HTTP/2
+`maxSessionMemory`, `max_concurrent_streams`); this bound is process-wide.
 
 ## gRPC
 

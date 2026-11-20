@@ -299,9 +299,26 @@ export interface GrpcServicesOptions {
 	 * is answered RESOURCE_EXHAUSTED instead. Default: `-1`, no limit.
 	 */
 	maxSendMessageLength?: number;
+	/**
+	 * The most request bytes this server decodes and holds at once, summed over
+	 * every call whose method has not settled yet; a call that would go past it
+	 * is answered RESOURCE_EXHAUSTED before any interceptor runs or any byte is
+	 * decoded. A call is always admitted when nothing else is in flight, so
+	 * one message up to `maxReceiveMessageLength` is still served.
+	 *
+	 * The per-message limit alone does not bound memory: a decoded request is
+	 * much larger than its bytes — every element of a repeated message field
+	 * becomes a full object, ~70 bytes of heap per wire byte for a request of
+	 * empty elements — and nothing else limits how many calls are decoded at
+	 * once. A call answered DEADLINE_EXCEEDED or CANCELLED keeps its bytes
+	 * counted until its method stops, since the method still holds its request.
+	 * `-1` for no limit. Default: 8 MiB (two maximal requests).
+	 */
+	maxInFlightRequestBytes?: number;
 }
 
 const DEFAULT_MAX_RECEIVE_MESSAGE_LENGTH = 4 * 1024 * 1024;
+const DEFAULT_MAX_IN_FLIGHT_REQUEST_BYTES = 8 * 1024 * 1024;
 
 /** A byte count, or `-1` for none: anything else is a configuration error. */
 function messageLimit(
@@ -333,6 +350,9 @@ export class GrpcServices {
 	readonly #keepUnknownFields: boolean;
 	readonly #maxReceive: number;
 	readonly #maxSend: number;
+	readonly #maxInFlight: number;
+	/** Request bytes of the calls whose method has not settled yet. */
+	#inFlight = 0;
 
 	constructor(protobuf: Protobuf, options: GrpcServicesOptions = {}) {
 		this.#protobuf = protobuf;
@@ -346,6 +366,11 @@ export class GrpcServices {
 			"maxSendMessageLength",
 			options.maxSendMessageLength,
 			-1,
+		);
+		this.#maxInFlight = messageLimit(
+			"maxInFlightRequestBytes",
+			options.maxInFlightRequestBytes,
+			DEFAULT_MAX_IN_FLIGHT_REQUEST_BYTES,
 		);
 		this.#onError =
 			options.onError ??
@@ -461,6 +486,15 @@ export class GrpcServices {
 				details: "Deadline exceeded",
 			};
 		}
+		if (
+			this.#inFlight > 0 &&
+			exceeds(this.#inFlight + call.message.length, this.#maxInFlight)
+		) {
+			return {
+				code: GrpcStatus.RESOURCE_EXHAUSTED,
+				details: `Too many request bytes in flight (${this.#maxInFlight} max)`,
+			};
+		}
 
 		const controller = new AbortController();
 		const context: GrpcContext = {
@@ -496,7 +530,16 @@ export class GrpcServices {
 		const cancel = () => stop(GrpcStatus.CANCELLED, "Cancelled");
 		call.signal?.addEventListener("abort", cancel, { once: true });
 		try {
-			return await Promise.race([this.#serve(call, route, context), ended]);
+			// Counted until the method settles, not until the call is answered:
+			// a call answered at its deadline still holds its decoded request.
+			const size = call.message.length;
+			this.#inFlight += size;
+			const serving = this.#serve(call, route, context);
+			const release = () => {
+				this.#inFlight -= size;
+			};
+			serving.then(release, release);
+			return await Promise.race([serving, ended]);
 		} finally {
 			clearTimeout(timer);
 			call.signal?.removeEventListener("abort", cancel);

@@ -219,6 +219,19 @@ describe("NeutrinoProvider — gRPC", () => {
 		});
 	});
 
+	it("fails at boot on an in-flight bound that is not a byte count", async () => {
+		const { provider } = boot(
+			defineConfig({
+				descriptorSets: [fixturePath("echo")],
+				grpc: { maxInFlightRequestBytes: -2 },
+			}),
+			{ grpc: () => {} },
+		);
+		await expect(provider.boot()).rejects.toMatchObject({
+			code: "E_NEUTRINO_INVALID_OPTION",
+		});
+	});
+
 	it("fails at boot on gRPC options that are not an object", async () => {
 		const { provider } = boot({
 			descriptorSets: [fixturePath("echo")],
