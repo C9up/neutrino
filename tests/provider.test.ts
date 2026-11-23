@@ -95,6 +95,9 @@ describe("NeutrinoProvider", () => {
 		await expect(provider.boot()).rejects.toThrow(
 			"[protobuf] missing config/protobuf.ts",
 		);
+		await expect(provider.boot()).rejects.toMatchObject({
+			code: "E_NEUTRINO_MISSING_CONFIG",
+		});
 	});
 
 	it("unseats the instance on shutdown", async () => {
@@ -107,11 +110,29 @@ describe("NeutrinoProvider", () => {
 		expect(() => protobuf.message("echo.SayReply")).toThrow(
 			/accessed before initialization/,
 		);
+		expect(() => protobuf.message("echo.SayReply")).toThrow(
+			expect.objectContaining({ code: "E_NEUTRINO_NOT_BOOTED" }),
+		);
 	});
 
 	it("fails at boot on a config that is not defineConfig's shape", async () => {
 		const { provider } = boot({ descriptorSets: "proto/app.binpb" });
 		await expect(provider.boot()).rejects.toThrow(/must export defineConfig/);
+		await expect(provider.boot()).rejects.toMatchObject({
+			code: "E_NEUTRINO_INVALID_CONFIG",
+		});
+	});
+});
+
+describe("NeutrinoProvider bindings", () => {
+	it("refuses a Protobuf token rebound to something else", async () => {
+		const { container, provider } = boot(
+			defineConfig({ descriptorSets: [fixturePath("echo")] }),
+		);
+		container.singleton(Protobuf, () => ({}));
+		await expect(provider.boot()).rejects.toMatchObject({
+			code: "E_NEUTRINO_INVALID_BINDING",
+		});
 	});
 });
 
@@ -121,6 +142,9 @@ describe("services/grpc", () => {
 		expect(Reflect.get(grpc, "then")).toBeUndefined();
 		expect(() => Reflect.get(grpc, "handle")).toThrow(
 			"[grpc] accessed before initialization",
+		);
+		expect(() => Reflect.get(grpc, "handle")).toThrow(
+			expect.objectContaining({ code: "E_NEUTRINO_NOT_BOOTED" }),
 		);
 	});
 });
@@ -137,6 +161,9 @@ describe("services/main", () => {
 describe("defineConfig", () => {
 	it("refuses a config that loads no schema", () => {
 		expect(() => defineConfig({})).toThrow(/declares no schema/);
+		expect(() => defineConfig({})).toThrow(
+			expect.objectContaining({ code: "E_NEUTRINO_INVALID_CONFIG" }),
+		);
 	});
 });
 

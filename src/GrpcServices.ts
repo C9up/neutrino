@@ -27,9 +27,15 @@ import {
 	type MessageShape,
 } from "@bufbuild/protobuf";
 import {
-	InvalidMetadataError,
-	NeutrinoError,
-	UnknownMethodError,
+	E_NEUTRINO_DUPLICATE_SERVICE,
+	E_NEUTRINO_GRPC_STATUS,
+	E_NEUTRINO_INVALID_IMPLEMENTATION,
+	E_NEUTRINO_INVALID_METADATA,
+	E_NEUTRINO_INVALID_OPTION,
+	E_NEUTRINO_INVALID_REPLY,
+	E_NEUTRINO_NEXT_CALLED_TWICE,
+	E_NEUTRINO_STREAMING_UNSUPPORTED,
+	E_NEUTRINO_UNKNOWN_METHOD,
 } from "./errors.js";
 import { GrpcMetadata } from "./GrpcMetadata.js";
 import type { Protobuf } from "./Protobuf.js";
@@ -56,20 +62,6 @@ export const GrpcStatus = {
 } as const;
 
 export type GrpcStatusCode = (typeof GrpcStatus)[keyof typeof GrpcStatus];
-
-/**
- * Thrown by a method implementation to answer a status instead of a reply.
- * Its message is sent to the client as the status details; any other error
- * is answered INTERNAL and its message is NOT sent.
- */
-export class GrpcError extends NeutrinoError {
-	readonly status: GrpcStatusCode;
-
-	constructor(status: GrpcStatusCode, message: string, options?: ErrorOptions) {
-		super("E_NEUTRINO_GRPC_STATUS", message, options);
-		this.status = status;
-	}
-}
 
 /** One call as the host's server hands it over. */
 export interface GrpcCall {
@@ -115,7 +107,7 @@ export interface GrpcContext {
 	/**
 	 * Aborted when the call is answered without the method: its deadline
 	 * passed, or the client cancelled it. Hand it to the database or HTTP
-	 * call the method waits on. Its `reason` is a {@link GrpcError}.
+	 * call the method waits on. Its `reason` is a {@link E_NEUTRINO_GRPC_STATUS}.
 	 */
 	readonly signal: AbortSignal;
 }
@@ -158,7 +150,7 @@ export type ServiceImpl<S extends DescService> =
 /**
  * Runs around every call it is registered for, before the request is even
  * decoded — the gRPC form of a middleware. Refuse the call by throwing a
- * {@link GrpcError}; let it through by returning what `next()` returns. Pass
+ * {@link E_NEUTRINO_GRPC_STATUS}; let it through by returning what `next()` returns. Pass
  * a value on to the method with a {@link GrpcContextKey}.
  */
 export type GrpcInterceptor = (
@@ -276,7 +268,7 @@ interface Route {
 
 export interface GrpcServicesOptions {
 	/**
-	 * Told about every error a method throws that is not a {@link GrpcError}
+	 * Told about every error a method throws that is not a {@link E_NEUTRINO_GRPC_STATUS}
 	 * — the ones the client only sees as INTERNAL. Default: `console.error`.
 	 */
 	onError?: (error: unknown, call: { path: string }) => void;
@@ -328,10 +320,7 @@ function messageLimit(
 ): number {
 	if (value === undefined) return fallback;
 	if (!Number.isSafeInteger(value) || value < -1) {
-		throw new NeutrinoError(
-			"E_NEUTRINO_INVALID_OPTION",
-			`Neutrino: ${name} must be a whole number of bytes, or -1 for no limit — got ${value}`,
-		);
+		throw new E_NEUTRINO_INVALID_OPTION([name, value]);
 	}
 	return value;
 }
@@ -402,15 +391,12 @@ export class GrpcServices {
 	): this {
 		const interceptors = [...(options.interceptors ?? [])];
 		if (this.#services.has(service.typeName)) {
-			throw new NeutrinoError(
-				"E_NEUTRINO_DUPLICATE_SERVICE",
-				`Neutrino: service "${service.typeName}" is already registered`,
-			);
+			throw new E_NEUTRINO_DUPLICATE_SERVICE([service.typeName]);
 		}
 		const names = new Set(service.methods.map((method) => method.localName));
 		for (const key of functionNamesOf(impl)) {
 			if (!names.has(key)) {
-				throw new UnknownMethodError(`/${service.typeName}/${key}`);
+				throw new E_NEUTRINO_UNKNOWN_METHOD([`/${service.typeName}/${key}`]);
 			}
 		}
 
@@ -420,16 +406,10 @@ export class GrpcServices {
 			if (implementation === undefined) continue;
 			const path = `/${service.typeName}/${method.name}`;
 			if (!isCallable(implementation)) {
-				throw new NeutrinoError(
-					"E_NEUTRINO_INVALID_IMPLEMENTATION",
-					`Neutrino: the implementation of "${path}" is not a function`,
-				);
+				throw new E_NEUTRINO_INVALID_IMPLEMENTATION([path]);
 			}
 			if (method.methodKind !== "unary") {
-				throw new NeutrinoError(
-					"E_NEUTRINO_STREAMING_UNSUPPORTED",
-					`Neutrino: ${method.methodKind} method "${path}" cannot be served yet — unary only`,
-				);
+				throw new E_NEUTRINO_STREAMING_UNSUPPORTED([method.methodKind, path]);
 			}
 			// Called on the implementation, which reads its dependencies off
 			// `this` when it is a class instance.
@@ -474,7 +454,7 @@ export class GrpcServices {
 		try {
 			metadata = new GrpcMetadata(call.metadata);
 		} catch (error) {
-			if (!(error instanceof InvalidMetadataError)) throw error;
+			if (!(error instanceof E_NEUTRINO_INVALID_METADATA)) throw error;
 			return { code: GrpcStatus.INTERNAL, details: error.message };
 		}
 		if (call.signal?.aborted === true) {
@@ -517,7 +497,7 @@ export class GrpcServices {
 		});
 		const stop = (code: GrpcStatusCode, details: string) => {
 			if (controller.signal.aborted) return;
-			controller.abort(new GrpcError(code, details));
+			controller.abort(new E_NEUTRINO_GRPC_STATUS(code, details));
 			end?.({ code, details });
 		};
 		const timer =
@@ -559,7 +539,7 @@ export class GrpcServices {
 		// an interceptor that refuses the call keeps its bytes from being read.
 		const invoke = async (): Promise<Record<string, unknown>> => {
 			if (context.signal.aborted) {
-				// Its reason is the GrpcError the call was answered with.
+				// Its reason is the E_NEUTRINO_GRPC_STATUS the call was answered with.
 				const reason: unknown = context.signal.reason;
 				throw reason;
 			}
@@ -570,16 +550,16 @@ export class GrpcServices {
 				});
 			} catch {
 				// decode reports every malformed input the same way.
-				throw new GrpcError(
+				throw new E_NEUTRINO_GRPC_STATUS(
 					GrpcStatus.INVALID_ARGUMENT,
 					`The request is not a valid ${method.input.typeName}`,
 				);
 			}
 			const reply = await run(request, context);
 			if (!isRecord(reply)) {
-				throw new TypeError(
+				throw new E_NEUTRINO_INVALID_REPLY([
 					`${call.path} returned ${reply === null ? "null" : typeof reply}, not a ${method.output.typeName}`,
-				);
+				]);
 			}
 			return reply;
 		};
@@ -587,9 +567,7 @@ export class GrpcServices {
 		let reached = -1;
 		const step = async (index: number): Promise<unknown> => {
 			if (index <= reached) {
-				throw new Error(
-					`An interceptor of ${call.path} called next() more than once`,
-				);
+				throw new E_NEUTRINO_NEXT_CALLED_TWICE([call.path]);
 			}
 			reached = index;
 			const interceptor = chain[index];
@@ -600,9 +578,9 @@ export class GrpcServices {
 		try {
 			const reply = await step(0);
 			if (!isRecord(reply)) {
-				throw new TypeError(
+				throw new E_NEUTRINO_INVALID_REPLY([
 					`An interceptor of ${call.path} returned ${reply === null ? "null" : typeof reply} instead of what next() gave it`,
-				);
+				]);
 			}
 			const message = this.#protobuf.encode(
 				method.output,
@@ -616,8 +594,8 @@ export class GrpcServices {
 			}
 			return { message };
 		} catch (error) {
-			if (error instanceof GrpcError) {
-				return { code: error.status, details: error.message };
+			if (error instanceof E_NEUTRINO_GRPC_STATUS) {
+				return { code: error.grpcStatus, details: error.message };
 			}
 			// Already answered DEADLINE_EXCEEDED or CANCELLED: what a method
 			// throws while it stops is not a failure to report.

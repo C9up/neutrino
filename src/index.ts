@@ -5,20 +5,11 @@ export {
 	type GrpcConfig,
 	type ProtobufConfig,
 } from "./config.js";
-export {
-	DuplicateTypeError,
-	InvalidDescriptorError,
-	InvalidMessageError,
-	InvalidMetadataError,
-	NeutrinoError,
-	UnknownMethodError,
-	UnknownTypeError,
-} from "./errors.js";
+export * as errors from "./errors.js";
 export { GrpcMetadata, type MetadataValue } from "./GrpcMetadata.js";
 export {
 	type GrpcCall,
 	type GrpcContext,
-	GrpcError,
 	type GrpcInterceptor,
 	type GrpcReply,
 	GrpcServices,

@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import {
+	errors,
 	type GrpcCall,
 	type GrpcContext,
-	GrpcError,
 	GrpcServices,
 	GrpcStatus,
 	Protobuf,
@@ -60,9 +60,9 @@ describe("grpc-timeout", () => {
 		expect(elapsed).toBeLessThan(1000);
 		const signal = seen[0]?.signal;
 		expect(signal?.aborted).toBe(true);
-		expect(signal?.reason).toBeInstanceOf(GrpcError);
+		expect(signal?.reason).toBeInstanceOf(errors.E_NEUTRINO_GRPC_STATUS);
 		expect(signal?.reason).toMatchObject({
-			status: GrpcStatus.DEADLINE_EXCEEDED,
+			grpcStatus: GrpcStatus.DEADLINE_EXCEEDED,
 		});
 	});
 
@@ -169,7 +169,10 @@ describe("after the deadline", () => {
 			await grpc.handle(call({ metadata: { "grpc-timeout": "10m" } })),
 		).toMatchObject({ code: GrpcStatus.DEADLINE_EXCEEDED });
 		await new Promise((resolve) => setTimeout(resolve, 60));
-		expect(ran).toEqual(["interceptor", "GrpcError: Deadline exceeded"]);
+		expect(ran).toEqual([
+			"interceptor",
+			"E_NEUTRINO_GRPC_STATUS [E_NEUTRINO_GRPC_STATUS]: Deadline exceeded",
+		]);
 	});
 });
 
@@ -186,7 +189,7 @@ describe("cancellation by the host", () => {
 		});
 		expect(seen[0]?.signal.aborted).toBe(true);
 		expect(seen[0]?.signal.reason).toMatchObject({
-			status: GrpcStatus.CANCELLED,
+			grpcStatus: GrpcStatus.CANCELLED,
 		});
 	});
 

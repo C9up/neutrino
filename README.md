@@ -46,9 +46,9 @@ protobuf.method("/echo.Echo/Say")   // a method by gRPC path: input, output, kin
 ```
 
 Bytes that do not decode — truncated, malformed, invalid UTF-8, nested too deep —
-raise `InvalidMessageError` (`E_NEUTRINO_INVALID_MESSAGE`), the error a transport
+raise `E_NEUTRINO_INVALID_MESSAGE`, the error a transport
 answers with a client error. Two sources that declare the same type differently
-raise `DuplicateTypeError` instead of one silently replacing the other.
+raise `E_NEUTRINO_DUPLICATE_TYPE` instead of one silently replacing the other.
 
 ## Generating code
 
@@ -144,14 +144,14 @@ read.
 
 ```ts
 // start/grpc.ts — a preload
-import { GrpcError, GrpcStatus } from "@c9up/neutrino"
+import { errors, GrpcStatus } from "@c9up/neutrino"
 import grpc from "@c9up/neutrino/services/grpc"
 import { EchoService } from "#generated/echo_pb.js"
 
 grpc.service(EchoService, {
   async say(request, context) {
     if (context.metadata.get("authorization").length === 0) {
-      throw new GrpcError(GrpcStatus.UNAUTHENTICATED, "sign in first")
+      throw new errors.E_NEUTRINO_GRPC_STATUS(GrpcStatus.UNAUTHENTICATED, "sign in first")
     }
     return { text: request.text }
   },
@@ -174,7 +174,7 @@ grpc.service(EchoService, {
   answered without the method — deadline passed, or the client cancelled (when
   the host reports cancellation through `GrpcCall.signal`). Pass the signal on
   to what the method waits for.
-- A `GrpcError` is answered with its status and message. Any other error is
+- An `E_NEUTRINO_GRPC_STATUS` is answered with its `grpcStatus` and message. Any other error is
   answered `INTERNAL` without its message, and reported (to `console.error`
   unless `onError` says otherwise).
 - Unary methods only: implementing a streaming method is refused at
@@ -188,7 +188,7 @@ grpc.service(EchoService, {
 
 An interceptor runs around every call it is registered for — `grpc.use()` for
 all of them, `{ interceptors }` for one service — before the request is even
-decoded. It refuses a call by throwing a `GrpcError`, lets it through by
+decoded. It refuses a call by throwing an `E_NEUTRINO_GRPC_STATUS`, lets it through by
 returning `next()`, and hands the method a value through a `GrpcContextKey`.
 A call to a method nobody serves is answered `UNIMPLEMENTED` without running
 any.

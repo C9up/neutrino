@@ -16,8 +16,11 @@
  */
 
 import {
+	E_NEUTRINO_GRPC_STATUS,
+	E_NEUTRINO_VERIFIER_FAILED,
+} from "./errors.js";
+import {
 	type GrpcContext,
-	GrpcError,
 	type GrpcInterceptor,
 	GrpcStatus,
 } from "./GrpcServices.js";
@@ -85,7 +88,7 @@ export function bearerAuth<User>(
 			const values = context.metadata.get("authorization");
 			if (values.length > 1) {
 				// Which one a proxy checked is anyone's guess: refuse both.
-				throw new GrpcError(
+				throw new E_NEUTRINO_GRPC_STATUS(
 					GrpcStatus.UNAUTHENTICATED,
 					"Several authorization values",
 				);
@@ -94,16 +97,22 @@ export function bearerAuth<User>(
 			const token =
 				typeof value === "string" ? BEARER.exec(value)?.[1] : undefined;
 			if (token === undefined) {
-				throw new GrpcError(GrpcStatus.UNAUTHENTICATED, "Missing bearer token");
+				throw new E_NEUTRINO_GRPC_STATUS(
+					GrpcStatus.UNAUTHENTICATED,
+					"Missing bearer token",
+				);
 			}
 			const result = await verifier.verify(token, options.guard);
 			if (result.strategyCrash === true) {
 				// The verifier broke, the client did nothing wrong: INTERNAL,
 				// like the 500 HTTP answers in the same case.
-				throw new Error("The token verifier failed");
+				throw new E_NEUTRINO_VERIFIER_FAILED();
 			}
 			if (!result.authenticated || result.user === undefined) {
-				throw new GrpcError(GrpcStatus.UNAUTHENTICATED, "Invalid token");
+				throw new E_NEUTRINO_GRPC_STATUS(
+					GrpcStatus.UNAUTHENTICATED,
+					"Invalid token",
+				);
 			}
 			users.set(context, result.user);
 			return next();
@@ -111,7 +120,10 @@ export function bearerAuth<User>(
 		user(context) {
 			const user = users.get(context);
 			if (user === undefined) {
-				throw new GrpcError(GrpcStatus.UNAUTHENTICATED, "Not authenticated");
+				throw new E_NEUTRINO_GRPC_STATUS(
+					GrpcStatus.UNAUTHENTICATED,
+					"Not authenticated",
+				);
 			}
 			return user;
 		},
@@ -141,7 +153,7 @@ export function rateLimit(
 	return async (context, next) => {
 		const decision = await limiter.checkRateLimit(keyFor(context));
 		if (!decision.allowed) {
-			throw new GrpcError(
+			throw new E_NEUTRINO_GRPC_STATUS(
 				GrpcStatus.RESOURCE_EXHAUSTED,
 				`Too many requests — retry in ${decision.resetSeconds}s`,
 			);

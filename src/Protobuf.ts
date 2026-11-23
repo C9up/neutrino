@@ -31,11 +31,11 @@ import {
 	FileDescriptorSetSchema,
 } from "@bufbuild/protobuf/wkt";
 import {
-	DuplicateTypeError,
-	InvalidDescriptorError,
-	InvalidMessageError,
-	UnknownMethodError,
-	UnknownTypeError,
+	E_NEUTRINO_DUPLICATE_TYPE,
+	E_NEUTRINO_INVALID_DESCRIPTOR,
+	E_NEUTRINO_INVALID_MESSAGE,
+	E_NEUTRINO_UNKNOWN_METHOD,
+	E_NEUTRINO_UNKNOWN_TYPE,
 } from "./errors.js";
 
 export interface ProtobufSources {
@@ -79,14 +79,14 @@ export class Protobuf {
 	/** The schema of a message type, by its full name (`package.Message`). */
 	message(typeName: string): DescMessage {
 		const schema = this.#registry.getMessage(typeName);
-		if (!schema) throw new UnknownTypeError(typeName);
+		if (!schema) throw new E_NEUTRINO_UNKNOWN_TYPE(["message", typeName]);
 		return schema;
 	}
 
 	/** A service, by its full name (`package.Service`). */
 	service(typeName: string): DescService {
 		const service = this.#registry.getService(typeName);
-		if (!service) throw new UnknownTypeError(typeName, "service");
+		if (!service) throw new E_NEUTRINO_UNKNOWN_TYPE(["service", typeName]);
 		return service;
 	}
 
@@ -100,12 +100,12 @@ export class Protobuf {
 		const service = match?.[1];
 		const name = match?.[2];
 		if (service === undefined || name === undefined) {
-			throw new UnknownMethodError(path);
+			throw new E_NEUTRINO_UNKNOWN_METHOD([path]);
 		}
 		const method = this.#registry
 			.getService(service)
 			?.methods.find((candidate) => candidate.name === name);
-		if (!method) throw new UnknownMethodError(path);
+		if (!method) throw new E_NEUTRINO_UNKNOWN_METHOD([path]);
 		return method;
 	}
 
@@ -120,7 +120,7 @@ export class Protobuf {
 				readUnknownFields: options.readUnknownFields ?? true,
 			});
 		} catch (error) {
-			throw new InvalidMessageError(schema.typeName, { cause: error });
+			throw new E_NEUTRINO_INVALID_MESSAGE([schema.typeName], { cause: error });
 		}
 	}
 
@@ -143,7 +143,7 @@ function readDescriptorSet(bytes: Uint8Array, source: string): Registry {
 	try {
 		return createFileRegistry(fromBinary(FileDescriptorSetSchema, bytes));
 	} catch (error) {
-		throw new InvalidDescriptorError(source, { cause: error });
+		throw new E_NEUTRINO_INVALID_DESCRIPTOR([source], { cause: error });
 	}
 }
 
@@ -163,7 +163,11 @@ function rejectConflicts(sourced: readonly Sourced[]): void {
 			if (previous === undefined) {
 				seen.set(type.typeName, { origin, proto });
 			} else if (!sameBytes(previous.proto, proto)) {
-				throw new DuplicateTypeError(type.typeName, previous.origin, origin);
+				throw new E_NEUTRINO_DUPLICATE_TYPE([
+					type.typeName,
+					previous.origin,
+					origin,
+				]);
 			}
 		}
 	}

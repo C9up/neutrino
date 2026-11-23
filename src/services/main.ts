@@ -11,6 +11,7 @@
  * provider.
  */
 
+import { E_NEUTRINO_NOT_BOOTED } from "../errors.js";
 import type { Protobuf } from "../Protobuf.js";
 
 let instance: Protobuf | undefined;
@@ -39,9 +40,7 @@ const protobuf: Protobuf = new Proxy(Object.create(null), {
 			return undefined;
 		}
 		if (!instance) {
-			throw new Error(
-				"[protobuf] accessed before initialization — register NeutrinoProvider, or call setProtobuf() yourself.",
-			);
+			throw new E_NEUTRINO_NOT_BOOTED(["protobuf", "setProtobuf"]);
 		}
 		const value = Reflect.get(instance, property, instance);
 		return typeof value === "function" ? value.bind(instance) : value;

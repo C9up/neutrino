@@ -11,6 +11,7 @@
  * provider.
  */
 
+import { E_NEUTRINO_NOT_BOOTED } from "../errors.js";
 import type { GrpcServices } from "../GrpcServices.js";
 
 let instance: GrpcServices | undefined;
@@ -39,9 +40,7 @@ const grpc: GrpcServices = new Proxy(Object.create(null), {
 			return undefined;
 		}
 		if (!instance) {
-			throw new Error(
-				"[grpc] accessed before initialization — register NeutrinoProvider, or call setGrpc() yourself.",
-			);
+			throw new E_NEUTRINO_NOT_BOOTED(["grpc", "setGrpc"]);
 		}
 		const value = Reflect.get(instance, property, instance);
 		return typeof value === "function" ? value.bind(instance) : value;

@@ -11,6 +11,7 @@
  */
 
 import type { DescFile } from "@bufbuild/protobuf";
+import { E_NEUTRINO_INVALID_CONFIG } from "./errors.js";
 import type { GrpcServicesOptions } from "./GrpcServices.js";
 
 /** The options of the gRPC server a config can set. */
@@ -39,9 +40,9 @@ export function defineConfig(config: ProtobufConfig): ProtobufConfig {
 	const count =
 		(config.descriptorSets?.length ?? 0) + (config.files?.length ?? 0);
 	if (count === 0) {
-		throw new Error(
-			"[protobuf] config declares no schema — give descriptorSets or files",
-		);
+		throw new E_NEUTRINO_INVALID_CONFIG([
+			"config declares no schema — give descriptorSets or files",
+		]);
 	}
 	return config;
 }

@@ -17,7 +17,12 @@
 import { readFileSync } from "node:fs";
 import "./augmentations.js";
 import type { ProtobufConfig } from "./config.js";
-import { NeutrinoError } from "./errors.js";
+import {
+	E_NEUTRINO_GRPC_UNSUPPORTED,
+	E_NEUTRINO_INVALID_BINDING,
+	E_NEUTRINO_INVALID_CONFIG,
+	E_NEUTRINO_MISSING_CONFIG,
+} from "./errors.js";
 import { type GrpcCall, type GrpcReply, GrpcServices } from "./GrpcServices.js";
 import { Protobuf } from "./Protobuf.js";
 import { clearGrpc, setGrpc } from "./services/grpc.js";
@@ -145,10 +150,7 @@ export default class NeutrinoProvider {
 		if (!container.has?.("server")) return;
 		const server = await container.resolve("server");
 		if (!isGrpcHost(server)) {
-			throw new NeutrinoError(
-				"E_NEUTRINO_GRPC_UNSUPPORTED",
-				"Neutrino: this server cannot serve gRPC — it has no grpc() method. Upgrade @c9up/ream.",
-			);
+			throw new E_NEUTRINO_GRPC_UNSUPPORTED();
 		}
 		const { maxReceiveMessageLength, maxSendMessageLength } =
 			this.#config().grpc ?? {};
@@ -158,12 +160,12 @@ export default class NeutrinoProvider {
 	#config(): ProtobufConfig {
 		const raw = this.#app.config.get("protobuf");
 		if (raw === undefined) {
-			throw new Error("[protobuf] missing config/protobuf.ts");
+			throw new E_NEUTRINO_MISSING_CONFIG();
 		}
 		if (!isProtobufConfig(raw)) {
-			throw new Error(
-				"[protobuf] config/protobuf.ts must export defineConfig({ descriptorSets, files }).",
-			);
+			throw new E_NEUTRINO_INVALID_CONFIG([
+				"config/protobuf.ts must export defineConfig({ descriptorSets, files }).",
+			]);
 		}
 		return raw;
 	}
@@ -171,9 +173,11 @@ export default class NeutrinoProvider {
 	async #resolveGrpc(): Promise<GrpcServices> {
 		const resolved = await this.#app.container.resolve(GrpcServices);
 		if (!(resolved instanceof GrpcServices)) {
-			throw new Error(
-				"[grpc] the container returned something that is not GrpcServices for the GrpcServices token.",
-			);
+			throw new E_NEUTRINO_INVALID_BINDING([
+				"grpc",
+				"GrpcServices",
+				"GrpcServices",
+			]);
 		}
 		return resolved;
 	}
@@ -181,9 +185,11 @@ export default class NeutrinoProvider {
 	async #resolve(): Promise<Protobuf> {
 		const resolved = await this.#app.container.resolve(Protobuf);
 		if (!(resolved instanceof Protobuf)) {
-			throw new Error(
-				"[protobuf] the container returned something that is not a Protobuf for the Protobuf token.",
-			);
+			throw new E_NEUTRINO_INVALID_BINDING([
+				"protobuf",
+				"a Protobuf",
+				"Protobuf",
+			]);
 		}
 		return resolved;
 	}

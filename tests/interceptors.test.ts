@@ -3,9 +3,9 @@ import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import {
 	bearerAuth,
+	errors,
 	type GrpcCall,
 	GrpcContextKey,
-	GrpcError,
 	type GrpcReply,
 	GrpcServices,
 	GrpcStatus,
@@ -89,7 +89,10 @@ describe("interceptors", () => {
 	it("refuse a call before its bytes are even decoded", async () => {
 		const log: string[] = [];
 		const grpc = serving(log).use(async () => {
-			throw new GrpcError(GrpcStatus.PERMISSION_DENIED, "not you");
+			throw new errors.E_NEUTRINO_GRPC_STATUS(
+				GrpcStatus.PERMISSION_DENIED,
+				"not you",
+			);
 		});
 		// Garbage bytes: decoding would answer INVALID_ARGUMENT. The refusal
 		// comes first, and the method never runs.
@@ -112,7 +115,10 @@ describe("interceptors", () => {
 				{
 					interceptors: [
 						async () => {
-							throw new GrpcError(GrpcStatus.UNAUTHENTICATED, "echo only");
+							throw new errors.E_NEUTRINO_GRPC_STATUS(
+								GrpcStatus.UNAUTHENTICATED,
+								"echo only",
+							);
 						},
 					],
 				},
@@ -153,6 +159,9 @@ describe("interceptors", () => {
 		);
 		expect(log).toEqual(["method"]);
 		expect(String(reported[0])).toContain("called next() more than once");
+		expect(reported[0]).toMatchObject({
+			code: "E_NEUTRINO_NEXT_CALLED_TWICE",
+		});
 	});
 
 	it("report an interceptor that forgets to return what next() gave it", async () => {
@@ -169,6 +178,7 @@ describe("interceptors", () => {
 			GrpcStatus.INTERNAL,
 		);
 		expect(String(reported[0])).toContain("instead of what next() gave it");
+		expect(reported[0]).toMatchObject({ code: "E_NEUTRINO_INVALID_REPLY" });
 	});
 
 	it("hand the method a value through a context key", async () => {
@@ -262,11 +272,24 @@ describe("bearerAuth", () => {
 			},
 		};
 		const log: string[] = [];
-		const reply = await protectedEcho(bearerAuth(broken), log).handle(
+		const reported: unknown[] = [];
+		const auth = bearerAuth(broken);
+		const grpc = new GrpcServices(protobuf, {
+			onError: (error) => reported.push(error),
+		})
+			.use(auth.interceptor)
+			.service(Echo, {
+				say: () => {
+					log.push("method");
+					return { text: "ok" };
+				},
+			});
+		const reply = await grpc.handle(
 			call("/echo.Echo/Say", { metadata: { authorization: "Bearer good" } }),
 		);
 		expect(status(reply)).toBe(GrpcStatus.INTERNAL);
 		expect(log).toEqual([]);
+		expect(reported[0]).toMatchObject({ code: "E_NEUTRINO_VERIFIER_FAILED" });
 	});
 
 	it("fails closed in a method the interceptor did not protect", async () => {

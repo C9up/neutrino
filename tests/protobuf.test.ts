@@ -2,14 +2,7 @@ import { readFileSync } from "node:fs";
 import { create, createFileRegistry, fromBinary } from "@bufbuild/protobuf";
 import { FileDescriptorSetSchema } from "@bufbuild/protobuf/wkt";
 import { describe, expect, it } from "vitest";
-import {
-	DuplicateTypeError,
-	InvalidDescriptorError,
-	InvalidMessageError,
-	Protobuf,
-	UnknownMethodError,
-	UnknownTypeError,
-} from "../src/index.js";
+import { errors, Protobuf } from "../src/index.js";
 
 // Compiled from tests/fixtures/*.proto with
 //   protoc --include_imports --descriptor_set_out=<name>.binpb <name>.proto
@@ -84,7 +77,7 @@ describe("Protobuf — codec", () => {
 				return caught;
 			}
 		})();
-		expect(error).toBeInstanceOf(UnknownTypeError);
+		expect(error).toBeInstanceOf(errors.E_NEUTRINO_UNKNOWN_TYPE);
 		expect(error).toMatchObject({ code: "E_NEUTRINO_UNKNOWN_TYPE" });
 	});
 });
@@ -105,7 +98,7 @@ describe("Protobuf — hostile bytes", () => {
 		const schema = protobuf.message("echo.SayRequest");
 		const bytes = protobuf.encode(schema, create(schema, { text: "hello" }));
 		const error = decodeError(bytes.subarray(0, bytes.length - 1));
-		expect(error).toBeInstanceOf(InvalidMessageError);
+		expect(error).toBeInstanceOf(errors.E_NEUTRINO_INVALID_MESSAGE);
 		expect(error).toMatchObject({
 			code: "E_NEUTRINO_INVALID_MESSAGE",
 			message: "Neutrino: the bytes are not a valid echo.SayRequest",
@@ -116,13 +109,13 @@ describe("Protobuf — hostile bytes", () => {
 	it("rejects a string field that is not UTF-8", () => {
 		expect(
 			decodeError(Uint8Array.from([0x0a, 0x02, 0xff, 0xfe])),
-		).toBeInstanceOf(InvalidMessageError);
+		).toBeInstanceOf(errors.E_NEUTRINO_INVALID_MESSAGE);
 	});
 
 	it("rejects nesting past the recursion limit instead of exhausting the stack", () => {
 		expect(decodeError(nestedTree(50), "echo.Tree")).toBeUndefined();
 		expect(decodeError(nestedTree(5000), "echo.Tree")).toBeInstanceOf(
-			InvalidMessageError,
+			errors.E_NEUTRINO_INVALID_MESSAGE,
 		);
 	});
 });
@@ -147,7 +140,7 @@ describe("Protobuf — method lookup", () => {
 		"//Say",
 		"",
 	])("refuses %j", (path) => {
-		expect(() => echo().method(path)).toThrow(UnknownMethodError);
+		expect(() => echo().method(path)).toThrow(errors.E_NEUTRINO_UNKNOWN_METHOD);
 	});
 });
 
@@ -156,7 +149,7 @@ describe("Protobuf — sources", () => {
 		expect(
 			() =>
 				new Protobuf({ descriptorSets: [Uint8Array.from([1, 2, 3, 4, 5])] }),
-		).toThrow(InvalidDescriptorError);
+		).toThrow(errors.E_NEUTRINO_INVALID_DESCRIPTOR);
 	});
 
 	it("accepts the same imported file in two descriptor sets", () => {
@@ -186,11 +179,11 @@ describe("Protobuf — sources", () => {
 			() =>
 				new Protobuf({ descriptorSets: [fixture("echo"), fixture("stale")] }),
 		).toThrow(
-			new DuplicateTypeError(
+			new errors.E_NEUTRINO_DUPLICATE_TYPE([
 				"echo.SayReply",
 				"echo.proto (descriptor set #0)",
 				"echo.proto (descriptor set #1)",
-			),
+			]),
 		);
 	});
 });

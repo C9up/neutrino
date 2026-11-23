@@ -3,15 +3,14 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import { FileDescriptorSetSchema } from "@bufbuild/protobuf/wkt";
 import { describe, expect, it, vi } from "vitest";
 import {
+	errors,
 	type GrpcCall,
 	type GrpcContext,
-	GrpcError,
 	type GrpcReply,
 	GrpcServices,
 	type GrpcServicesOptions,
 	GrpcStatus,
 	Protobuf,
-	UnknownTypeError,
 } from "../src/index.js";
 
 const protobuf = new Protobuf({
@@ -96,10 +95,13 @@ describe("GrpcServices — calls", () => {
 		);
 	});
 
-	it("answers the status of a GrpcError, with its message", async () => {
+	it("answers the status of an E_NEUTRINO_GRPC_STATUS, with its message", async () => {
 		const grpc = new GrpcServices(protobuf).service(Echo, {
 			say: () => {
-				throw new GrpcError(GrpcStatus.NOT_FOUND, "no such text");
+				throw new errors.E_NEUTRINO_GRPC_STATUS(
+					GrpcStatus.NOT_FOUND,
+					"no such text",
+				);
 			},
 		});
 		expect(await grpc.handle(call("/echo.Echo/Say", "a"))).toEqual({
@@ -158,6 +160,7 @@ describe("GrpcServices — calls", () => {
 		expect(String(reported[0])).toContain(
 			"returned string, not a echo.SayReply",
 		);
+		expect(reported[0]).toMatchObject({ code: "E_NEUTRINO_INVALID_REPLY" });
 	});
 
 	it("answers INVALID_ARGUMENT to bytes that are not the input message", async () => {
@@ -305,7 +308,9 @@ describe("GrpcServices — registration", () => {
 	});
 
 	it("names an unknown service", () => {
-		expect(() => protobuf.service("echo.Nope")).toThrow(UnknownTypeError);
+		expect(() => protobuf.service("echo.Nope")).toThrow(
+			errors.E_NEUTRINO_UNKNOWN_TYPE,
+		);
 	});
 });
 

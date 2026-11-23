@@ -12,7 +12,7 @@
  */
 
 import { Buffer } from "node:buffer";
-import { InvalidMetadataError } from "./errors.js";
+import { E_NEUTRINO_INVALID_METADATA } from "./errors.js";
 
 export type MetadataValue = string | Uint8Array;
 
@@ -36,7 +36,7 @@ function decodeBinary(key: string, value: string): Uint8Array[] {
 	const parts = key.startsWith("grpc-") ? [value] : value.split(",");
 	return parts.map((part) => {
 		const text = part.trim();
-		if (!BASE64.test(text)) throw new InvalidMetadataError(key);
+		if (!BASE64.test(text)) throw new E_NEUTRINO_INVALID_METADATA(key);
 		// Copied out of Buffer's shared pool, into a plain Uint8Array.
 		return new Uint8Array(Buffer.from(text, "base64"));
 	});
@@ -47,7 +47,7 @@ export class GrpcMetadata {
 
 	/**
 	 * @param headers the call's request headers, a repeated one as a list.
-	 * @throws InvalidMetadataError on a `-bin` value that is not base64.
+	 * @throws E_NEUTRINO_INVALID_METADATA on a `-bin` value that is not base64.
 	 */
 	constructor(
 		headers: Readonly<Record<string, string | readonly string[]>> = {},
