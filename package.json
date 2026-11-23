@@ -1,6 +1,6 @@
 {
   "name": "@c9up/neutrino",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Neutrino — Protocol Buffers and gRPC for the Ream framework: a schema-enforced contract for non-JS clients",
   "license": "MIT",
   "type": "module",
